@@ -27,7 +27,7 @@ def test_basic_claim(
     yvmkusd_whale
 ):
     fr_account = accounts[fee_receiver.address]
-    fr_account.balance += 10 ** 18
+    fr_account.balance += 20 ** 18
     yprisma.approve(staker, 2**256-1, sender=user)
     yprisma.approve(staker, 2**256-1, sender=user2)
     yprisma.approve(rewards, 2**256-1, sender=fr_account)
@@ -85,6 +85,19 @@ def test_basic_claim(
     gov_bal = yprisma.balanceOf(rewards)/1e18
     print(stable_bal, gov_bal)
     assert stable_bal < 4000
+
+    staker.setElection(0, sender=user2)
+    staker.setElection(10, sender=user2)
+
+    for i in range(10):
+        amt = i * 100 * 10 ** 18
+        rewards.depositRewards(amt, amt, sender=fr_account)
+        week = rewards.getWeek()
+        assert amt == rewards.weeklyRewardInfo(week).amountGov
+        assert amt == rewards.weeklyRewardInfo(week).amountStable
+        chain.pending_timestamp += WEEK
+        chain.mine()
+
     assert False    
     
 

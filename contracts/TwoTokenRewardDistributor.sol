@@ -10,7 +10,7 @@ contract TwoTokenRewardDistributor is WeekStart {
     using SafeERC20 for IERC20;
 
     uint constant MAX_BPS = 10_000;
-    uint constant PRECISION = 1e8;
+    uint constant PRECISION = 1e18;
     IYearnBoostedStaker public immutable staker;
     IERC20 public immutable govToken;
     IERC20 public immutable stableToken;
@@ -264,7 +264,6 @@ contract TwoTokenRewardDistributor is WeekStart {
                 break;
             }
         }
-
 
         return (claimStartWeek, claimEndWeek);
     }
