@@ -25,7 +25,7 @@ contract YearnBoostedStaker {
     uint16 public globalLastUpdateWeek;
     WeightData public globalGrowthRate;
     mapping(uint week => WeightData weightData) private globalWeeklyWeights;
-    mapping(uint week => WeightData weightDataToRealize) private globalWeeklyToRealize;
+    mapping(uint week => WeightData weightDataToRealize) public globalWeeklyToRealize;
 
     // Generic token interface
     uint public totalSupply;
@@ -423,17 +423,18 @@ contract YearnBoostedStaker {
             for (uint128 weekIndex; weekIndex < MAX_STAKE_GROWTH_WEEKS;) {
                 uint8 mask = uint8(1 << weekIndex);
                 if (bitmap & mask == mask) {
-                    data = accountWeeklyToRealize[msg.sender][weekIndex + systemWeek];
+                    uint weekToCheck = systemWeek + MAX_STAKE_GROWTH_WEEKS - weekIndex;
+                    data = accountWeeklyToRealize[msg.sender][weekToCheck];
                     uint128 w = data.weight;
                     data.weightedElection = uint128(w * _election);
-                    accountWeeklyToRealize[msg.sender][weekIndex + systemWeek] = data;
+                    accountWeeklyToRealize[msg.sender][weekToCheck] = data;
 
                     if (increase) {
-                        globalWeeklyToRealize[weekIndex + systemWeek].weightedElection += (w * diff);
+                        globalWeeklyToRealize[weekToCheck].weightedElection += (w * diff);
                         globalGrowthRate.weightedElection += (acctData.pendingStake * diff);
                     }
                     else {
-                        globalWeeklyToRealize[weekIndex + systemWeek].weightedElection -= (w * diff);
+                        globalWeeklyToRealize[weekToCheck].weightedElection -= (w * diff);
                         globalGrowthRate.weightedElection -= (acctData.pendingStake * diff);
                     }
                 }

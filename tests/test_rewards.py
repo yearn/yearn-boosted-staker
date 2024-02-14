@@ -71,11 +71,22 @@ def test_basic_claim(
         assert amt == rewards.weeklyRewardInfo(week).amountStable
         chain.pending_timestamp += WEEK
         chain.mine()
-
-
-    rewards.getSuggestedClaimRange(user)
     
-    tx = rewards.claimWithRange(0,2,sender=user)
+    rewards.weeklyRewardInfo(5)
+    assert rewards.getClaimableAt(user, 5).tokenStablesAmount > 0
+    assert rewards.getClaimableAt(user2, 5).tokenStablesAmount > 0
+    assert rewards.getClaimableAt(user, 5).tokenGovAmount > 0
+    assert rewards.getClaimableAt(user2, 5).tokenGovAmount > 0
+
+    tx = rewards.claimWithRange(0,5,sender=user)
+    tx = rewards.claimWithRange(0,5,sender=user2)
+
+    stable_bal = yvmkusd.balanceOf(rewards)/1e18
+    gov_bal = yprisma.balanceOf(rewards)/1e18
+    print(stable_bal, gov_bal)
+    assert stable_bal < 4000
+    assert False    
+    
 
 def test_claim_blocked_in_current_week(user, accounts, staker, gov, user2, yprisma):
     pass

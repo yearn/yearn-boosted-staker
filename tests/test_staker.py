@@ -186,6 +186,7 @@ def test_sequenced_deposits_and_withdrawals(user, accounts, staker, gov, user2, 
             'map': [0,0,0,0,0], # each index represents a week, and item represents the pending amount
             'start_balance': yprisma.balanceOf(user.address),
             'deposited_with_weight': 0,
+            'weighted_election': 0,
         },
         user2.address: {
             'balance_of': 0,
@@ -195,6 +196,7 @@ def test_sequenced_deposits_and_withdrawals(user, accounts, staker, gov, user2, 
             'map': [0,0,0,0,0], # each index represents a week, and item represents the pending amount
             'start_balance': yprisma.balanceOf(user2.address),
             'deposited_with_weight': 0,
+            'weighted_election': 0,
         },
     }
     global_growth = 0
@@ -232,6 +234,7 @@ def test_sequenced_deposits_and_withdrawals(user, accounts, staker, gov, user2, 
                         user_data[u.address]['weight'] += instant_weight
                         user_data[u.address]['realized'] += weight
                         global_weight += instant_weight
+                        user_data[u.address]['weighted_election'] += (weight + election)
                     else:
                         weight = amt // 2
                         user_data[u.address]['weight'] += instant_weight
@@ -416,6 +419,8 @@ def check_invariants(accounts, staker, user_data, yprisma):
     assert total_balance == staker.totalSupply()
     data = staker.getGlobalWeight()
     assert data.weight == sum_user_weight
+    assert data.weight * 10_000 >= data.weightedElection
+
 
 def try_invalid_stuff(gov, staker, yprisma, user):
     amount = 100 * 10 ** 18

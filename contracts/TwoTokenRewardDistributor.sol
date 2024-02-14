@@ -19,8 +19,8 @@ contract TwoTokenRewardDistributor is WeekStart {
     uint public weightedDepositIndex;
 
     struct RewardInfo {
-        uint128 amountGov;
-        uint128 amountStable;
+        uint amountGov;
+        uint amountStable;
     }
 
     struct AccountInfo {
@@ -79,11 +79,11 @@ contract TwoTokenRewardDistributor is WeekStart {
         RewardInfo memory info = weeklyRewardInfo[week];
         if (_amountGov > 0) {
             govToken.transferFrom(_target, address(this), _amountGov);
-            info.amountGov += uint128(_amountGov);
+            info.amountGov += uint(_amountGov);
         }
         if (_amountStable > 0) {
             stableToken.transferFrom(_target, address(this), _amountStable);
-            info.amountStable += uint128(_amountStable);
+            info.amountStable += uint(_amountStable);
         }
 
         weeklyRewardInfo[week] = info;
@@ -154,7 +154,7 @@ contract TwoTokenRewardDistributor is WeekStart {
         require(_claimStartWeek <= _claimEndWeek, "claimStartWeek > claimEndWeek");
         require(_claimEndWeek < currentWeek, "claimEndWeek >= currentWeek");
         require(_claimStartWeek >= info.lastClaimWeek, "claimStartWeek too low");
-        (tokenGovAmount, tokenStablesAmount) = _getTotalClaimableByRange(_account, _claimStartWeek, _claimEndWeek + 1);
+        (tokenGovAmount, tokenStablesAmount) = _getTotalClaimableByRange(_account, _claimStartWeek, _claimEndWeek);
         if (tokenGovAmount > 0) {
             if (info.autoStake) {
                 if (staker.approvedWeightedDepositor(address(this))) {
@@ -217,7 +217,7 @@ contract TwoTokenRewardDistributor is WeekStart {
         uint _claimEndWeek
     ) external view returns (uint totalGovAmount, uint totalStableAmount) {
         uint currentWeek = getWeek();
-        if (_claimEndWeek >= currentWeek) _claimEndWeek = currentWeek - 1;
+        if (_claimEndWeek >= currentWeek) _claimEndWeek = currentWeek;
         return _getTotalClaimableByRange(_account, _claimStartWeek, _claimEndWeek);
     }
 
@@ -226,7 +226,7 @@ contract TwoTokenRewardDistributor is WeekStart {
         uint _claimStartWeek,
         uint _claimEndWeek
     ) internal view returns (uint totalGovAmount, uint totalStableAmount) {
-        for (uint i = _claimStartWeek; i < _claimEndWeek; i++) {
+        for (uint i = _claimStartWeek; i <= _claimEndWeek; i++) {
             (uint govAmount, uint stableAmount) = getClaimableAt(_account, i);
             totalGovAmount += govAmount;
             totalStableAmount += stableAmount;
