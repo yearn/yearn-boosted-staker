@@ -117,8 +117,8 @@ contract TwoTokenRewardDistributor is WeekStart {
     }
 
     /**
-        @notice Claim all owed rewards since the last week touched by the user. Retrieves both tokens if available.
-        @dev    Claiming via this function will tend to be more gas efficient when used with values from `getSuggestedClaimRange`.
+        @notice Claim rewards within a range of specified past weeks.
+        @dev    Useful to target specific weeks with known reward amounts.
     */
     function claimWithRange(
         uint _claimStartWeek,
@@ -128,9 +128,8 @@ contract TwoTokenRewardDistributor is WeekStart {
     }
 
     /**
-        @notice Claim on behalf of another account. Claims all owed rewards since the last week touched by the user. 
-                Retrieves both tokens if available.
-        @dev    Claiming via this function will tend to be more gas efficient when used with values from `getSuggestedClaimRange`.
+        @notice Claim on behalf of another account for a range of specified past weeks.
+        @dev    Useful to target specific weeks with known reward amounts. Claiming via this function will tend to be more gas efficient when used with values from `getSuggestedClaimRange`.
     */
     function claimWithRangeFor(
         address _account,
@@ -152,22 +151,24 @@ contract TwoTokenRewardDistributor is WeekStart {
         if (_claimStartWeek < info.lastClaimWeek) _claimStartWeek = info.lastClaimWeek;
         uint currentWeek = getWeek();
         require(_claimStartWeek < currentWeek, "claimStartWeek >= currentWeek");
+        require(_claimStartWeek <= _claimEndWeek, "claimStartWeek > claimEndWeek");
         require(_claimEndWeek < currentWeek, "claimEndWeek >= currentWeek");
         require(_claimStartWeek >= info.lastClaimWeek, "claimStartWeek too low");
         (tokenGovAmount, tokenStablesAmount) = _getTotalClaimableByRange(_account, _claimStartWeek, _claimEndWeek + 1);
-        if (info.autoStake && tokenGovAmount > 0) {
-            if (staker.approvedWeightedDepositor(address(this))) {
-                staker.depositAsWeighted(_account, tokenGovAmount, weightedDepositIndex);
+        if (tokenGovAmount > 0) {
+            if (info.autoStake) {
+                if (staker.approvedWeightedDepositor(address(this))) {
+                    staker.depositAsWeighted(_account, tokenGovAmount, weightedDepositIndex);
+                }
+                else {
+                    staker.depositFor(_account, tokenGovAmount);
+                }
             }
-            else {
-                staker.depositFor(_account, tokenGovAmount);
+            else{
+                govToken.transfer(_account, tokenGovAmount);
             }
-            
         }
-        else{
-            govToken.transfer(_account, tokenGovAmount);
-        }
-        if (tokenStablesAmount > 0) stableToken.transfer(_account, tokenGovAmount);
+        if (tokenStablesAmount > 0) stableToken.transfer(_account, tokenStablesAmount);
         _claimEndWeek += 1;
         info.lastClaimWeek = uint64(_claimEndWeek);
         accountInfo[_account] = info;
@@ -176,18 +177,22 @@ contract TwoTokenRewardDistributor is WeekStart {
         }
     }
 
+    /**
+        @notice Helper function used to determine overal share of rewards at a particular week.
+        @dev Results scaled to PRECSION.
+    */
     function computeSharesAt(address _account, uint _week) public view returns (uint govTokenShare, uint stableTokenShare) {
         require(_week <= getWeek(), "Invalid week");
         IYearnBoostedStaker.WeightData memory acctWeight = staker.getAccountWeightAt(_account, _week);
         if (acctWeight.weight == 0) return (0, 0); // User has no weight.
         IYearnBoostedStaker.WeightData memory globalWeight = staker.getGlobalWeightAt(_week);
-        return computeSharesFromWeight(acctWeight, globalWeight);
+        return _computeSharesFromWeight(acctWeight, globalWeight);
     }
 
-    function computeSharesFromWeight(
+    function _computeSharesFromWeight(
         IYearnBoostedStaker.WeightData memory _acctWeight,
         IYearnBoostedStaker.WeightData memory _globalWeight
-    ) public view returns (uint govTokenShare, uint stableTokenShare) {
+    ) internal view returns (uint govTokenShare, uint stableTokenShare) {
         if (_acctWeight.weight == 0) return (0, 0);
         if (_globalWeight.weight == 0) return (0, 0);
         
@@ -204,13 +209,23 @@ contract TwoTokenRewardDistributor is WeekStart {
     }
 
     /**
-        @dev Returns total earned in each of the weeks.
+        @dev Returns sum of both token types earned with the specified range of weeks.
     */
+    function getTotalClaimableByRange(
+        address _account,
+        uint _claimStartWeek,
+        uint _claimEndWeek
+    ) external view returns (uint totalGovAmount, uint totalStableAmount) {
+        uint currentWeek = getWeek();
+        if (_claimEndWeek >= currentWeek) _claimEndWeek = currentWeek - 1;
+        return _getTotalClaimableByRange(_account, _claimStartWeek, _claimEndWeek);
+    }
+
     function _getTotalClaimableByRange(
         address _account,
         uint _claimStartWeek,
         uint _claimEndWeek
-    ) public view returns (uint totalGovAmount, uint totalStableAmount) {
+    ) internal view returns (uint totalGovAmount, uint totalStableAmount) {
         for (uint i = _claimStartWeek; i < _claimEndWeek; i++) {
             (uint govAmount, uint stableAmount) = getClaimableAt(_account, i);
             totalGovAmount += govAmount;
@@ -218,12 +233,8 @@ contract TwoTokenRewardDistributor is WeekStart {
         }
     }
 
-    function _onlyClaimers(address _account) internal returns (bool approved) {
-        return approvedClaimer[_account][msg.sender] || _account == msg.sender;
-    }
-
     /**
-        @notice Returns suggested start and end range for claim weeks.
+        @notice Helper function returns suggested start and end range for claim weeks.
         @dev    This function is designed to be called prior to ranged claims to shorted the number of iterations
                 required to loop if possible.
     */
@@ -276,6 +287,10 @@ contract TwoTokenRewardDistributor is WeekStart {
         RewardInfo memory info = weeklyRewardInfo[_week];
         tokenGovAmount = info.amountGov == 0 ? 0 : shareGov * info.amountGov / PRECISION;
         tokenStablesAmount = info.amountStable == 0 ? 0 : shareStable * info.amountStable / PRECISION;
+    }
+
+    function _onlyClaimers(address _account) internal returns (bool approved) {
+        return approvedClaimer[_account][msg.sender] || _account == msg.sender;
     }
 
     /**

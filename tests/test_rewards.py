@@ -62,24 +62,20 @@ def test_basic_claim(
 
     # Week 1: Deposit to rewards
     staker.setElection(5_500, sender=user2)
-    amt = 2_000 * 10 ** 18
-    rewards.depositRewards(amt, amt, sender=fr_account)
-    week = rewards.getWeek()
-    assert amt == rewards.weeklyRewardInfo(week).amountGov
-    assert amt == rewards.weeklyRewardInfo(week).amountStable
+
+    for i in range(5):
+        amt = i * 1_000 * 10 ** 18
+        rewards.depositRewards(amt, amt, sender=fr_account)
+        week = rewards.getWeek()
+        assert amt == rewards.weeklyRewardInfo(week).amountGov
+        assert amt == rewards.weeklyRewardInfo(week).amountStable
+        chain.pending_timestamp += WEEK
+        chain.mine()
+
 
     rewards.getSuggestedClaimRange(user)
-    chain.pending_timestamp += WEEK
-    chain.mine()
-
-    # Attempt a claim
-    assert False
-    tx = rewards.claim(sender=user)
-    tx = rewards.claimWithRange(0,0,sender=user)
-    tx = rewards.claim(sender=user2)
-    # Why is there random 0.2 dust left behind?
-
-    assert False
+    
+    tx = rewards.claimWithRange(0,2,sender=user)
 
 def test_claim_blocked_in_current_week(user, accounts, staker, gov, user2, yprisma):
     pass
@@ -94,4 +90,7 @@ def check_invariants(user, accounts, staker, gov, user2, yprisma):
     pass
 
 def test_prevent_limit_claim_from_lowering_last_claim_week():
+    pass
+
+def test_claims_when_start_week_is_set_gt_zero():
     pass

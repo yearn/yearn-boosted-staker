@@ -93,12 +93,13 @@ def stable_token(yvmkusd):
     yield yvmkusd
 
 @pytest.fixture(scope="session")
-def rewards(project, user, staker, gov_token, stable_token):
+def rewards(project, user, staker, gov_token, stable_token, gov):
     rewards_contract = user.deploy(
         project.TwoTokenRewardDistributor,
         staker,
         gov_token,
-        stable_token
+        stable_token,
+        gov
     )
     yield rewards_contract
 
