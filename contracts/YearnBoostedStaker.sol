@@ -107,7 +107,16 @@ contract YearnBoostedStaker {
         @param _amount Amount of tokens to deposit.
     */
     function deposit(uint _amount) external returns (uint) {
-        return _deposit(msg.sender, _amount);
+        return _deposit(msg.sender, _amount, type(uint).max);
+    }
+
+    /**
+        @notice Deposit tokens into the staking contract.
+        @param _amount Amount of tokens to deposit.
+    */
+    function depositWithWeight(uint _amount, uint _election) external returns (uint) {
+        require(_election <= 10_000, 'Too High');
+        return _deposit(msg.sender, _amount, _election);
     }
 
     function depositFor(address _account, uint _amount) external returns (uint) {
@@ -120,16 +129,18 @@ contract YearnBoostedStaker {
             );
         }
         
-        return _deposit(_account, _amount);
+        return _deposit(_account, _amount, type(uint).max);
     }
 
-    function _deposit(address _account, uint _amount) internal returns (uint) {
+    function _deposit(address _account, uint _amount, uint _election) internal returns (uint) {
         require(_amount > 1 && _amount < type(uint104).max >> 1, "invalid amount");
 
         uint systemWeek = getWeek();
         // Before going further, let's sync our account and global weights
         (AccountData memory acctData, WeightData memory accountWeightData) = _checkpointAccount(_account, systemWeek);
         WeightData memory globalWeight = _checkpointGlobal(systemWeek);
+
+        if (_election != type(uint).max) (acctData, accountWeightData) = _setElection(_election, acctData, accountWeightData, systemWeek);
 
         uint128 weight = uint128(_amount >> 1);
         _amount = weight << 1; // This helps prevent balance/weight discrepencies.
@@ -384,34 +395,42 @@ contract YearnBoostedStaker {
         uint systemWeek = getWeek();
         // Sync all weights
         (AccountData memory acctData, WeightData memory data)= _checkpointAccount(msg.sender, systemWeek);
-        
-        require(acctData.election != _election, "No change");
-        
         (WeightData memory globalData)= _checkpointGlobal(getWeek());
+        (acctData, data) = _setElection(_election, acctData, data, systemWeek);
+
+        accountData[msg.sender] = acctData;
+        accountWeeklyWeights[msg.sender][systemWeek] = data;
+    }
+        
+    function _setElection(
+        uint _election, 
+        AccountData memory acctData, 
+        WeightData memory accountWeightData, 
+        uint systemWeek
+    ) internal returns (AccountData memory, WeightData memory) {
+        require(acctData.election != _election, "!Election Change");
 
         uint16 prevElection = acctData.election;
         acctData.election = uint16(_election);
-        accountData[msg.sender] = acctData;
 
-        if (data.weight == 0) {
+        if (accountWeightData.weight == 0) {
             emit ElectionSet(msg.sender, _election);
-            return;
+            return (acctData, accountWeightData);
         }
         
         // Update AccountWeekly - past already done via checkpoint. Need just this week.
-        data.weightedElection = uint128(data.weight * _election);
-        accountWeeklyWeights[msg.sender][systemWeek] = data;
+        accountWeightData.weightedElection = uint128(accountWeightData.weight * _election);
 
         // Update GlobalWeekly
         bool increase = _election > prevElection;
         uint128 diff;
         if (increase) {
             diff = uint128(_election - prevElection);
-            globalWeeklyWeights[systemWeek].weightedElection += data.weight * diff;
+            globalWeeklyWeights[systemWeek].weightedElection += accountWeightData.weight * diff;
         }
         else {
             diff = uint128(prevElection - _election);
-            globalWeeklyWeights[systemWeek].weightedElection -= data.weight * diff;
+            globalWeeklyWeights[systemWeek].weightedElection -= accountWeightData.weight * diff;
         }
         
         uint8 bitmap = acctData.updateWeeksBitmap;
@@ -443,6 +462,7 @@ contract YearnBoostedStaker {
         }
 
         emit ElectionSet(msg.sender, _election);
+        return (acctData, accountWeightData);
     }
     
     /**

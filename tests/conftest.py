@@ -22,6 +22,7 @@ w3 = Web3(HTTPProvider(os.getenv("CHAIN_PROVIDER", "http://127.0.0.1:8545")))
 @pytest.fixture(scope="session")
 def gov(accounts):
     gov = accounts['0x4444AAAACDBa5580282365e25b16309Bd770ce4a']
+    gov.balance += 10 ** 18
     # accounts[0].transfer(gov, 10**18)
     yield gov
     
@@ -48,17 +49,33 @@ def yprisma():
     yield Contract('0xe3668873D944E4A949DA05fc8bDE419eFF543882')
 
 @pytest.fixture(scope="session")
-def yprisma_whale(accounts, fee_receiver, user, yprisma, user2):
+def prisma():
+    yield Contract('0xdA47862a83dac0c112BA89c6abC2159b95afd71C')
+
+@pytest.fixture(scope="session")
+def yprisma_whale(accounts, fee_receiver, user, yprisma, user2, rando):
     whale = accounts['0x69833361991ed76f9e8DBBcdf9ea1520fEbFb4a7']
     whale.balance += 10 ** 18
     yprisma.transfer(user, 100_000 * 10 ** 18, sender=whale)
     yprisma.transfer(user2, 100_000 * 10 ** 18, sender=whale)
     yprisma.transfer(fee_receiver, 100_000 * 10 ** 18, sender=whale)
+    yprisma.transfer(rando, 100_000 * 10 ** 18, sender=whale)
     yield whale
 
 @pytest.fixture(scope="session")
 def yvmkusd():
     yield Contract('0x04AeBe2e4301CdF5E9c57B01eBdfe4Ac4B48DD13')
+
+0x075e72a5eDf65F0A5f44699c7654C1a76941Ddc8
+@pytest.fixture(scope="session")
+def dai_whale(accounts):
+    whale = accounts['0x6B175474E89094C44Da98b954EedeAC495271d0F']
+    whale.balance += 10 ** 18
+    yield whale
+
+@pytest.fixture(scope="session")
+def dai():
+    yield Contract('0x6B175474E89094C44Da98b954EedeAC495271d0F')
 
 @pytest.fixture(scope="session")
 def yvmkusd_whale(accounts, yvmkusd, fee_receiver):

@@ -8,12 +8,12 @@ from utils.constants import MAX_INT, ApprovalStatus, ZERO_ADDRESS
 
 WEEK = 60 * 60 * 24 * 7
 
-def test_checkpoint_with_limit(user, accounts, staker, gov, user2, yprisma):
+def test_checkpoint_with_limit(user, accounts, staker, gov, user2, yprisma, yprisma_whale):
     yprisma.approve(staker, MAX_INT, sender=user)
     yprisma.approve(staker, MAX_INT, sender=user2)
     amount = 100 * 10 ** 18
     
-    staker.deposit(amount, sender=user)
+    staker.depositWithWeight(amount, 10_000, sender=user)
     bal = staker.balanceOf(user)
     print(bal)
     print(staker.accountData(user))
@@ -234,6 +234,7 @@ def test_sequenced_deposits_and_withdrawals(user, accounts, staker, gov, user2, 
                         user_data[u.address]['weight'] += instant_weight
                         user_data[u.address]['realized'] += weight
                         global_weight += instant_weight
+                        election = staker.accountData(u).election
                         user_data[u.address]['weighted_election'] += (weight + election)
                     else:
                         weight = amt // 2
@@ -780,8 +781,6 @@ def test_checkpoint_abandoned_acct(staker, yprisma, user):
             w = amount * 2.5
         assert scale(data.weightedElection) == scale(w) * new_election
         assert data.weight == w
-
-    assert False
 
 def scale(value):
     return value / 10 ** 18
