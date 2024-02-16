@@ -163,12 +163,12 @@ contract YearnBoostedStaker {
         accountWeeklyToRealize[_account][realizeWeek] = data;
 
         data = globalWeeklyToRealize[realizeWeek];
-        data.weight = data.weight + uint128(weight);
-        data.weightedElection += (data.weight * acctData.election);
+        data.weight += uint128(weight);
+        data.weightedElection += weight * acctData.election;
         globalWeeklyToRealize[realizeWeek] = data;
 
         data.weight = globalWeight.weight + uint128(weight);
-        data.weightedElection = globalWeight.weightedElection + (weight * acctData.election);
+        data.weightedElection += (weight * acctData.election);
         globalWeeklyWeights[systemWeek] = data;
 
         acctData.updateWeeksBitmap |= 1; // Flip bit at least-weighted position.

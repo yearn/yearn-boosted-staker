@@ -66,10 +66,9 @@ def yprisma_whale(accounts, fee_receiver, user, yprisma, user2, rando):
 def yvmkusd():
     yield Contract('0x04AeBe2e4301CdF5E9c57B01eBdfe4Ac4B48DD13')
 
-0x075e72a5eDf65F0A5f44699c7654C1a76941Ddc8
 @pytest.fixture(scope="session")
 def dai_whale(accounts):
-    whale = accounts['0x6B175474E89094C44Da98b954EedeAC495271d0F']
+    whale = accounts['0x075e72a5eDf65F0A5f44699c7654C1a76941Ddc8']
     whale.balance += 10 ** 18
     yield whale
 
