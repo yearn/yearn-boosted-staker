@@ -13,7 +13,7 @@ def test_checkpoint_with_limit(user, accounts, staker, gov, user2, yprisma, ypri
     yprisma.approve(staker, MAX_INT, sender=user2)
     amount = 100 * 10 ** 18
     
-    staker.depositWithWeight(amount, 10_000, sender=user)
+    staker.depositAndSetElection(amount, 10_000, sender=user)
     bal = staker.balanceOf(user)
     print(bal)
     print(staker.accountData(user))
@@ -50,6 +50,8 @@ def test_sequenced_deposits_and_withdrawals(user, accounts, staker, gov, user2, 
         'grand_total': 0,
         'weighted_deposit_sum': 0,
         'weighted_deposit_count': 0,
+        'deposit_and_set_election_count': 0,
+        'deposit_and_set_election_sum': 0,
     }
     yprisma.approve(staker, MAX_INT, sender=user)
     yprisma.approve(staker, MAX_INT, sender=user2)
@@ -74,30 +76,34 @@ def test_sequenced_deposits_and_withdrawals(user, accounts, staker, gov, user2, 
     ACTIVITY = {
         0 :
             [
+                {'type': 'deposit_and_set_election', 'user': user, 'election': 1_000, 'amount': 10 * 10 ** 18},
+                {'type': 'deposit_and_set_election', 'user': user2, 'election': 10_000, 'amount': 20 * 10 ** 18},
                 {'type': 'withdrawal', 'user': user, 'amount': 0},
                 {'type': 'weighted_deposit', 'user': user, 'idx': 2, 'amount': 2 * 10 ** 18},
                 {'type': 'deposit', 'user': user, 'amount': 2},
                 {'type': 'set_election', 'user': user, 'amount': 5_000},
-                {'type': 'withdrawal', 'user': user, 'amount': 2}, # !!!
+                {'type': 'withdrawal', 'user': user, 'amount': 2},
                 {'type': 'deposit', 'user': user, 'amount': 10 * 10 ** 18 + 1},
                 {'type': 'deposit', 'user': user2, 'amount': 200 * 10 ** 18 + 1},
+                
                 {'type': 'withdrawal', 'user': user, 'amount': 2},
             ]
         ,
         1 :
             [
                 {'type': 'set_election', 'user': user2, 'amount': 2_000},
-                {'type': 'deposit', 'user': user, 'amount': 100 * 10 ** 18 + 1}, # w = 50 + 100 = 150; p = 100
+                {'type': 'deposit', 'user': user, 'amount': 100 * 10 ** 18 + 1},
                 {'type': 'set_election', 'user': user2, 'amount': 6_000},
                 {'type': 'set_election', 'user': user, 'amount': 1_000},
-                {'type': 'withdrawal', 'user': user2, 'amount': 20 * 10 ** 18 + 1}, # w = 180; p = 90;
+                {'type': 'withdrawal', 'user': user2, 'amount': 20 * 10 ** 18 + 1},
             ]
         ,
         3 :
             [
-                {'type': 'deposit', 'user': user, 'amount': 100 * 10 ** 18}, # w = 150 + 100 + 50 = 300; p = 150
-                {'type': 'withdrawal', 'user': user, 'amount': 100 * 10 ** 18}, # w = 300 - 50 = 250; p = 100
-                {'type': 'withdrawal', 'user': user2, 'amount': 60 * 10 ** 18}, # w = 180 + 90 - 30 = 
+                {'type': 'deposit', 'user': user, 'amount': 100 * 10 ** 18},
+                {'type': 'withdrawal', 'user': user, 'amount': 100 * 10 ** 18},
+                {'type': 'withdrawal', 'user': user2, 'amount': 60 * 10 ** 18},
+                {'type': 'deposit_and_set_election', 'user': user2, 'election': 10_000, 'amount': 20 * 10 ** 18},
             ]
         ,
         4 :
@@ -109,6 +115,7 @@ def test_sequenced_deposits_and_withdrawals(user, accounts, staker, gov, user2, 
         5 :
             [
                 {'type': 'deposit', 'user': user, 'amount': 1 * 10 ** 18},
+                {'type': 'deposit_and_set_election', 'user': user, 'election': 10_000, 'amount': 20 * 10 ** 18},
                 {'type': 'withdrawal', 'user': user2, 'amount': 1 * 10 ** 18},
                 {'type': 'weighted_deposit', 'user': user, 'idx': 2, 'amount': 2 * 10 ** 18},
             ]
@@ -122,6 +129,7 @@ def test_sequenced_deposits_and_withdrawals(user, accounts, staker, gov, user2, 
         ,
         11 :
             [
+                {'type': 'deposit_and_set_election', 'user': user2, 'election': 10_000, 'amount': 20 * 10 ** 18},
                 {'type': 'withdrawal', 'user': user, 'amount': 1 * 10 ** 18},
                 {'type': 'withdrawal', 'user': user2, 'amount': 1 * 10 ** 18},
                 {'type': 'weighted_deposit', 'user': user2, 'idx': 0, 'amount': 1 * 10 ** 18},
@@ -249,6 +257,51 @@ def test_sequenced_deposits_and_withdrawals(user, accounts, staker, gov, user2, 
                         global_growth_weighted_election -= (pending * diff)
                     user_data[u.address]['election'] = new_election
                     tx = staker.setElection(new_election, sender=u)
+                
+                if action['type'] == 'deposit_and_set_election':
+                    new_election = action['election']
+                    prev_election = election
+                    gain = True if prev_election < new_election else False
+                    diff = abs(prev_election - new_election)
+                    if new_election == prev_election:
+                        with ape.reverts():
+                            tx = staker.setElection(new_election, sender=u)
+                        continue
+                    weight = user_data[u.address]['weight']
+                    pending = user_data[u.address]['pending']
+                    user_data[u.address]['weighted_election'] = (weight * new_election)
+                    if gain:
+                        global_weighted_election += (weight * diff)
+                        global_growth_weighted_election += (pending * diff)
+                    else:
+                        global_weighted_election -= (weight * diff)
+                        global_growth_weighted_election -= (pending * diff)
+                    user_data[u.address]['election'] = new_election
+                    ##### Now for the deposit part
+                    election = new_election
+                    weight = amt // 2
+                    user_data[u.address]['balance_of'] += weight * 2
+                    user_data[u.address]['weight'] += weight
+                    user_data[u.address]['pending'] += weight
+                    user_data[u.address]['map'][0] += weight
+                    user_data[u.address]['weighted_election'] += (weight * election)
+                    global_weight += weight
+                    global_weighted_election += (weight * election)
+                    global_growth += weight
+                    global_growth_weighted_election += (weight * election)
+                    tx = staker.depositAndSetElection(amt, new_election, sender=u)
+                    event = list(tx.decode_logs(staker.Deposit))[0]
+                    print(f'Weight added: {event.weightAdded}')
+                    assert event.account == u.address
+                    assert event.week == staker.getWeek()
+                    assert event.amount == amt // 2 * 2
+                    data = staker.getAccountWeight(u)
+                    assert event.newUserWeight == user_data[u.address]['weight'] == data.weight
+                    assert event.weightAdded == weight
+                    gas_analysis['deposit_and_set_election_count'] += 1
+                    gas_analysis['deposit_and_set_election_sum'] += tx.gas_used
+                    gas_analysis['grand_total'] += tx.gas_used
+
                 if action['type'] == 'weighted_deposit':
                     if amt == 0:
                         with ape.reverts():
@@ -375,9 +428,11 @@ def test_sequenced_deposits_and_withdrawals(user, accounts, staker, gov, user2, 
     weighted_deposit_avg = gas_analysis['weighted_deposit_sum']/gas_analysis['weighted_deposit_count']
     deposit_avg = gas_analysis['deposit_sum']/gas_analysis['deposit_count']
     withdraw_avg = gas_analysis['withdrawals_sum']/gas_analysis['withdrawals_count']
+    deposit_and_set_election_avg = gas_analysis['deposit_and_set_election_sum']/gas_analysis['deposit_and_set_election_count']
     print(f'deposit_avg {deposit_avg:,.0f}')
     print(f'weighted_deposit_avg {weighted_deposit_avg:,.0f}')
     print(f'withdraw_avg {withdraw_avg:,.0f}')
+    print(f'deposit_and_set_election_avg {withdraw_avg:,.0f}')
     print(f'⛽️⛽️⛽️')
 
 def print_state(week_index, action, staker, data, user_address):

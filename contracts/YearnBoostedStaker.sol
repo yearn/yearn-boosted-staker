@@ -114,7 +114,7 @@ contract YearnBoostedStaker {
         @notice Deposit tokens into the staking contract.
         @param _amount Amount of tokens to deposit.
     */
-    function depositWithWeight(uint _amount, uint _election) external returns (uint) {
+    function depositAndSetElection(uint _amount, uint _election) external returns (uint) {
         require(_election <= 10_000, 'Too High');
         return _deposit(msg.sender, _amount, _election);
     }
@@ -138,17 +138,11 @@ contract YearnBoostedStaker {
         uint systemWeek = getWeek();
         // Before going further, let's sync our account and global weights
         (AccountData memory acctData, WeightData memory accountWeightData) = _checkpointAccount(_account, systemWeek);
-        WeightData memory globalWeight = _checkpointGlobal(systemWeek);
-
         if (_election != type(uint).max) (acctData, accountWeightData) = _setElection(_election, acctData, accountWeightData, systemWeek);
-
+        WeightData memory globalWeight = _checkpointGlobal(systemWeek);
+        
         uint128 weight = uint128(_amount >> 1);
         _amount = weight << 1; // This helps prevent balance/weight discrepencies.
-        
-        WeightData memory data = globalGrowthRate;
-        data.weight += uint128(weight);
-        data.weightedElection += uint128(weight * acctData.election);
-        globalGrowthRate = data;
 
         acctData.pendingStake += uint104(weight);
         uint realizeWeek = systemWeek + MAX_STAKE_GROWTH_WEEKS;
@@ -157,7 +151,7 @@ contract YearnBoostedStaker {
         accountWeightData.weightedElection = (accountWeightData.weight * acctData.election);
         accountWeeklyWeights[_account][systemWeek] = accountWeightData;
         
-        data = accountWeeklyToRealize[_account][realizeWeek];
+        WeightData memory data = accountWeeklyToRealize[_account][realizeWeek];
         data.weight += weight;
         data.weightedElection = data.weight * acctData.election;
         accountWeeklyToRealize[_account][realizeWeek] = data;
@@ -170,6 +164,11 @@ contract YearnBoostedStaker {
         data.weight = globalWeight.weight + uint128(weight);
         data.weightedElection = globalWeight.weightedElection + (weight * acctData.election);
         globalWeeklyWeights[systemWeek] = data;
+
+        data = globalGrowthRate;
+        data.weight += uint128(weight);
+        data.weightedElection += uint128(weight * acctData.election);
+        globalGrowthRate = data;
 
         acctData.updateWeeksBitmap |= 1; // Flip bit at least-weighted position.
         accountData[_account] = acctData;
@@ -507,9 +506,14 @@ contract YearnBoostedStaker {
         accountData[_account] = acctData;
     }
 
-    function _checkpointAccount(address _account, uint _systemWeek) internal returns (AccountData memory, WeightData memory) {
-        
-        AccountData memory acctData = accountData[_account];
+    function _checkpointAccount(
+        address _account, 
+        uint _systemWeek
+    ) internal returns (
+        AccountData memory acctData, 
+        WeightData memory data
+    ) {
+        acctData = accountData[_account];
 
         uint lastUpdateWeek = acctData.lastUpdateWeek;
 
@@ -730,11 +734,11 @@ contract YearnBoostedStaker {
     }
 
     /**
-        @notice Returns the balance of underlying staked tokens for an account
-        @param _account Account to query balance.
-        @return balance of account.
+        @notice Returns the account's active election.
+        @param _account Account to query.
+        @return election value in terms of BPS.
     */
-    function getElection(address _account) external view returns (uint) {
+    function getElection(address _account) external view returns (uint election) {
         return accountData[_account].election;
     }
 
