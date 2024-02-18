@@ -39,6 +39,12 @@ def user2(accounts):
     yield accounts[2]
 
 @pytest.fixture(scope="session")
+def user3(accounts):
+    accounts[3].balance += int(100e18)
+    assert accounts[3].balance > 0
+    yield accounts[3]
+
+@pytest.fixture(scope="session")
 def rando(accounts):
     accounts[9].balance += int(100e18)
     assert accounts[9].balance > 0
@@ -53,14 +59,20 @@ def prisma():
     yield Contract('0xdA47862a83dac0c112BA89c6abC2159b95afd71C')
 
 @pytest.fixture(scope="session")
-def yprisma_whale(accounts, fee_receiver, user, yprisma, user2, rando):
+def yprisma_whale(accounts, fee_receiver, user, yprisma, user2, user3, rando):
     whale = accounts['0x69833361991ed76f9e8DBBcdf9ea1520fEbFb4a7']
     whale.balance += 10 ** 18
     yprisma.transfer(user, 100_000 * 10 ** 18, sender=whale)
     yprisma.transfer(user2, 100_000 * 10 ** 18, sender=whale)
-    yprisma.transfer(fee_receiver, 100_000 * 10 ** 18, sender=whale)
+    yprisma.transfer(user3, 100_000 * 10 ** 18, sender=whale)
+    yprisma.transfer(fee_receiver, 200_000 * 10 ** 18, sender=whale)
     yprisma.transfer(rando, 100_000 * 10 ** 18, sender=whale)
     yield whale
+
+
+@pytest.fixture(scope="session")
+def mkusd():
+    yield Contract('0x4591DBfF62656E7859Afe5e45f6f47D3669fBB28')
 
 @pytest.fixture(scope="session")
 def yvmkusd():
@@ -77,10 +89,14 @@ def dai():
     yield Contract('0x6B175474E89094C44Da98b954EedeAC495271d0F')
 
 @pytest.fixture(scope="session")
-def yvmkusd_whale(accounts, yvmkusd, fee_receiver):
+def yvmkusd_whale(accounts, yvmkusd, fee_receiver, mkusd):
     whale = accounts['0x93A62dA5a14C80f265DAbC077fCEE437B1a0Efde']
+    sp = accounts['0xed8B26D99834540C5013701bB3715faFD39993Ba']
+    sp.balance += 10 ** 18
+    mkusd.approve(yvmkusd, 2**256-1, sender=sp)
+    yvmkusd.deposit(mkusd.balanceOf(sp), whale, sender=sp)
     whale.balance += 10 ** 18
-    yvmkusd.transfer(fee_receiver, 20_000 * 10 ** 18, sender=whale)
+    yvmkusd.transfer(fee_receiver, 100_000 * 10 ** 18, sender=whale)
     yield whale
 
 @pytest.fixture(scope="session")
@@ -120,5 +136,19 @@ def rewards(project, user, staker, gov_token, stable_token, gov):
     yield rewards_contract
 
 @pytest.fixture(scope="session")
-def fee_receiver():
-    yield Contract(YEARN_FEE_RECEIVER)
+def fee_receiver(rewards, accounts, gov_token, stable_token):
+    fee_receiver = YEARN_FEE_RECEIVER
+    fr_account = accounts[fee_receiver]
+    fr_account.balance += 20 ** 18
+    gov_token.approve(rewards, 2**256-1, sender=fr_account)
+    stable_token.approve(rewards, 2**256-1, sender=fr_account)
+    yield Contract(fee_receiver)
+
+@pytest.fixture(scope="session")
+def fee_receiver_acc(rewards, accounts, gov_token, stable_token):
+    fee_receiver = YEARN_FEE_RECEIVER
+    fr_account = accounts[fee_receiver]
+    fr_account.balance += 20 ** 18
+    gov_token.approve(rewards, 2**256-1, sender=fr_account)
+    stable_token.approve(rewards, 2**256-1, sender=fr_account)
+    yield fr_account
