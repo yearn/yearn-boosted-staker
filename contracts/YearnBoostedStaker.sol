@@ -168,7 +168,7 @@ contract YearnBoostedStaker {
         globalWeeklyToRealize[realizeWeek] = data;
 
         data.weight = globalWeight.weight + uint128(weight);
-        data.weightedElection += (weight * acctData.election);
+        data.weightedElection = globalWeight.weightedElection + (weight * acctData.election);
         globalWeeklyWeights[systemWeek] = data;
 
         acctData.updateWeeksBitmap |= 1; // Flip bit at least-weighted position.
@@ -331,7 +331,16 @@ contract YearnBoostedStaker {
     /**
         @dev Split from main withdraw function to avoid stack too deep.
     */
-    function _performWithdraw(address _account, AccountData memory acctData, uint systemWeek, uint128 amountNeeded) internal returns (uint128 weightToRemove, AccountData memory, uint128) {
+    function _performWithdraw(
+        address _account, 
+        AccountData memory acctData, 
+        uint systemWeek, 
+        uint128 amountNeeded
+    ) internal returns (
+        uint128 weightToRemove, 
+        AccountData memory, // acctData
+        uint128             // amountNeeded
+    ) {
         uint8 bitmap = acctData.updateWeeksBitmap;
         if (bitmap > 0) {
             WeightData memory data;
