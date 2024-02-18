@@ -416,7 +416,10 @@ contract YearnBoostedStaker {
         AccountData memory acctData, 
         WeightData memory accountWeightData, 
         uint systemWeek
-    ) internal returns (AccountData memory, WeightData memory) {
+    ) internal returns (
+        AccountData memory, // acctData
+        WeightData memory   // Account weekly data
+    ) {
         require(acctData.election != _election, "!Election Change");
 
         uint16 prevElection = acctData.election;
@@ -436,13 +439,16 @@ contract YearnBoostedStaker {
         if (increase) {
             diff = uint128(_election - prevElection);
             globalWeeklyWeights[systemWeek].weightedElection += accountWeightData.weight * diff;
+            globalGrowthRate.weightedElection += (acctData.pendingStake * diff);
         }
         else {
             diff = uint128(prevElection - _election);
             globalWeeklyWeights[systemWeek].weightedElection -= accountWeightData.weight * diff;
+            globalGrowthRate.weightedElection -= (acctData.pendingStake * diff);
         }
         
         uint8 bitmap = acctData.updateWeeksBitmap;
+
         if (bitmap > 0) {
             WeightData memory data;
             // Loop through all weeks to locate any necessary updates.
@@ -456,14 +462,11 @@ contract YearnBoostedStaker {
                     uint128 w = data.weight;
                     data.weightedElection = uint128(w * _election);
                     accountWeeklyToRealize[msg.sender][weekToCheck] = data;
-
                     if (increase) {
                         globalWeeklyToRealize[weekToCheck].weightedElection += (w * diff);
-                        globalGrowthRate.weightedElection += (acctData.pendingStake * diff);
                     }
                     else {
                         globalWeeklyToRealize[weekToCheck].weightedElection -= (w * diff);
-                        globalGrowthRate.weightedElection -= (acctData.pendingStake * diff);
                     }
                 }
                 unchecked { weekIndex++; }

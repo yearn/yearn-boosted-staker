@@ -74,20 +74,22 @@ def test_sequenced_deposits_and_withdrawals(user, accounts, staker, gov, user2, 
     ACTIVITY = {
         0 :
             [
-                # {'type': 'withdrawal', 'user': user, 'amount': 0},
+                {'type': 'withdrawal', 'user': user, 'amount': 0},
                 {'type': 'weighted_deposit', 'user': user, 'idx': 2, 'amount': 2 * 10 ** 18},
-                # {'type': 'deposit', 'user': user, 'amount': 2},
+                {'type': 'deposit', 'user': user, 'amount': 2},
                 {'type': 'set_election', 'user': user, 'amount': 5_000},
-                # {'type': 'withdrawal', 'user': user, 'amount': 2},
-                {'type': 'deposit', 'user': user, 'amount': 10 * 10 ** 18 + 1}, # w = 50; p = 50
-                {'type': 'deposit', 'user': user2, 'amount': 200 * 10 ** 18 + 1}, # w = 100; p = 100;
-                # {'type': 'withdrawal', 'user': user, 'amount': 2},
+                {'type': 'withdrawal', 'user': user, 'amount': 2}, # !!!
+                {'type': 'deposit', 'user': user, 'amount': 10 * 10 ** 18 + 1},
+                {'type': 'deposit', 'user': user2, 'amount': 200 * 10 ** 18 + 1},
+                {'type': 'withdrawal', 'user': user, 'amount': 2},
             ]
         ,
         1 :
             [
                 {'type': 'set_election', 'user': user2, 'amount': 2_000},
                 {'type': 'deposit', 'user': user, 'amount': 100 * 10 ** 18 + 1}, # w = 50 + 100 = 150; p = 100
+                {'type': 'set_election', 'user': user2, 'amount': 6_000},
+                {'type': 'set_election', 'user': user, 'amount': 1_000},
                 {'type': 'withdrawal', 'user': user2, 'amount': 20 * 10 ** 18 + 1}, # w = 180; p = 90;
             ]
         ,
@@ -416,6 +418,8 @@ def check_invariants(accounts, staker, user_data, yprisma, global_growth, global
     sum_user_weight = 0
     total_balance = 0
     sum_weighted_elections = Decimal(0)
+    sum_pending = 0
+    sum_weighted_pending = 0
     for u in user_data:
         starting_balance = user_data[u]['start_balance']
         realized = user_data[u]['realized']
@@ -443,12 +447,17 @@ def check_invariants(accounts, staker, user_data, yprisma, global_growth, global
         assert data.weight * election == data.weightedElection
         assert data.weight * user_data[u]['election'] == data.weightedElection
         sum_weighted_elections += Decimal(data.weightedElection)
+        sum_pending += user_data[u]['pending']
+        p = staker.accountData(u).pendingStake
         if staker.accountData(u)['realizedStake'] != realized:
-            # it's possible for these to be out of sync based on checkpoint
+            # it's possible for realized/pending to be out of sync.
+            # checkpoint resolves it
             print(f"{u} {staker.accountData(u)['realizedStake']} | Contract call")
             print(f"{u} {realized} | Manual")
             staker.checkpointAccount(u, sender=accounts[u])
+            p = staker.accountData(u).pendingStake
             assert staker.accountData(u)['realizedStake'] == realized
+        sum_weighted_pending += p * election
         assert staker.accountData(u)['realizedStake'] == realized
         assert staker.accountData(u)['pendingStake'] == pending
         if staker.balanceOf(u) == 0:
@@ -461,6 +470,9 @@ def check_invariants(accounts, staker, user_data, yprisma, global_growth, global
             assert weight == realized * 5
 
     data = staker.globalGrowthRate()
+    assert sum_pending == data.weight
+    assert sum_weighted_pending == data.weightedElection
+    assert sum_weighted_pending == global_growth_weighted_election
     assert data.weight == global_growth
     assert data.weightedElection == global_growth_weighted_election 
 
