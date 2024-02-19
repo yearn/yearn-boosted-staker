@@ -124,6 +124,7 @@ def test_sequenced_deposits_and_withdrawals(user, accounts, staker, gov, user2, 
             [
                 {'type': 'deposit', 'user': user, 'amount': 1 * 10 ** 18},
                 {'type': 'withdrawal', 'user': user2, 'amount': 1 * 10 ** 18},
+                {'type': 'deposit', 'user': user2, 'amount': 100 * 10 ** 18},
                 {'type': 'weighted_deposit', 'user': user2, 'idx': 4, 'amount': 2 * 10 ** 18},
             ]
         ,

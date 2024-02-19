@@ -138,8 +138,11 @@ contract YearnBoostedStaker {
         uint systemWeek = getWeek();
         // Before going further, let's sync our account and global weights
         (AccountData memory acctData, WeightData memory accountWeightData) = _checkpointAccount(_account, systemWeek);
-        if (_election != type(uint).max) (acctData, accountWeightData) = _setElection(_election, acctData, accountWeightData, systemWeek);
         WeightData memory globalWeight = _checkpointGlobal(systemWeek);
+        if (_election != type(uint).max) {
+            (acctData, accountWeightData) = _setElection(_election, acctData, accountWeightData, systemWeek);
+            globalWeight = globalWeeklyWeights[systemWeek];
+        }
         
         uint128 weight = uint128(_amount >> 1);
         _amount = weight << 1; // This helps prevent balance/weight discrepencies.
@@ -432,7 +435,6 @@ contract YearnBoostedStaker {
         // Update AccountWeekly - past already done via checkpoint. Need just this week.
         accountWeightData.weightedElection = uint128(accountWeightData.weight * _election);
 
-        // Update GlobalWeekly
         bool increase = _election > prevElection;
         uint128 diff;
         if (increase) {
@@ -451,8 +453,6 @@ contract YearnBoostedStaker {
         if (bitmap > 0) {
             WeightData memory data;
             // Loop through all weeks to locate any necessary updates.
-            // Update AccountRealizedWeek
-            // Update GlobalRealizedWeek
             for (uint128 weekIndex; weekIndex < MAX_STAKE_GROWTH_WEEKS;) {
                 uint8 mask = uint8(1 << weekIndex);
                 if (bitmap & mask == mask) {

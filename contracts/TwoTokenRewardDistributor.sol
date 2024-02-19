@@ -19,8 +19,8 @@ contract TwoTokenRewardDistributor is WeekStart {
     uint public weightedDepositIndex;
 
     struct RewardInfo {
-        uint amountToken1;
-        uint amountToken2;
+        uint128 amountToken1;
+        uint128 amountToken2;
     }
 
     struct AccountInfo {
@@ -86,11 +86,11 @@ contract TwoTokenRewardDistributor is WeekStart {
         RewardInfo memory info = weeklyRewardInfo[week];
         if (_amountToken1 > 0) {
             token1.transferFrom(_target, address(this), _amountToken1);
-            info.amountToken1 += uint(_amountToken1);
+            info.amountToken1 += uint128(_amountToken1);
         }
         if (_amountToken2 > 0) {
             token2.transferFrom(_target, address(this), _amountToken2);
-            info.amountToken2 += uint(_amountToken2);
+            info.amountToken2 += uint128(_amountToken2);
         }
 
         weeklyRewardInfo[week] = info;
@@ -157,7 +157,6 @@ contract TwoTokenRewardDistributor is WeekStart {
         if (_claimStartWeek < START_WEEK) _claimStartWeek = START_WEEK;
         if (_claimStartWeek < info.lastClaimWeek) _claimStartWeek = info.lastClaimWeek;
         uint currentWeek = getWeek();
-        require(_claimStartWeek < currentWeek, "claimStartWeek >= currentWeek");
         require(_claimStartWeek <= _claimEndWeek, "claimStartWeek > claimEndWeek");
         require(_claimEndWeek < currentWeek, "claimEndWeek >= currentWeek");
         require(_claimStartWeek >= info.lastClaimWeek, "claimStartWeek too low");
@@ -297,6 +296,20 @@ contract TwoTokenRewardDistributor is WeekStart {
 
     function _onlyClaimers(address _account) internal returns (bool approved) {
         return approvedClaimer[_account][msg.sender] || _account == msg.sender;
+    }
+
+    /**
+        @notice Returns whether an account is auto-staking their rewards on claim, 
+                and if so, how many extra weeks of boost they receive when doing so.
+        @param _account Account to search for.
+        @return autoStake True when user has token1 claims configured to be staked.
+        @return numWeeks number of extra boosted weeks recevied when auto-staking.
+    */
+    function getAccountAutoStake(address _account) external view returns (bool autoStake, uint numWeeks) {
+        return (
+            staker.approvedWeightedDepositor(address(this)) && accountInfo[_account].autoStake, 
+            numWeeks = weightedDepositIndex
+        );
     }
 
     /**
