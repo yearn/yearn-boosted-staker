@@ -120,11 +120,9 @@ def simulate_with_data(data, rewards, staker, chain, yprisma, fee_receiver_acc):
         expected = data['expected']
         e = expected['token1'][i]
         a = int(actual.totalAmountToken1/1e18)
-        print(e, a)
         assert e == a
         e = expected['token2'][i]
         a = int(actual.totalAmountToken2/1e18)
-        print(e, a)
         assert e == a
 
     return 
@@ -251,6 +249,7 @@ def test_claim_to_staker(user, accounts, staker, gov, user2, yprisma, yvmkusd, r
 
 
 def test_claim_blocked_in_current_week(user, accounts, staker, gov, user2, yprisma):
+
     pass
 
 def test_multiple_deposits_in_week(user, accounts, staker, gov, user2, yprisma):
@@ -265,5 +264,121 @@ def check_invariants(user, accounts, staker, gov, user2, yprisma):
 def test_prevent_limit_claim_from_lowering_last_claim_week():
     pass
 
-def test_claims_when_start_week_is_set_gt_zero():
-    pass
+def test_claims_when_start_week_is_set_gt_zero(
+    staker, 
+    user2, fee_receiver_acc,
+    fee_receiver, 
+    gov_token, 
+    stable_token, 
+    gov, 
+    user,
+    yprisma_whale,
+    yvmkusd_whale
+):
+    start_time = Contract('0x5d17eA085F2FF5da3e6979D5d26F1dBaB664ccf8').startTime()
+    staker = user.deploy(
+        project.YearnBoostedStaker, 
+        gov_token, 
+        4, # <-- Number of growth weeks
+        start_time,
+        gov
+    )
+    rewards = user.deploy(
+        project.TwoTokenRewardDistributor,
+        staker,
+        gov_token,
+        stable_token,
+        gov
+    )
+    yprisma = gov_token
+    yprisma.approve(staker, 2**256-1, sender=user)
+    yprisma.approve(staker, 2**256-1, sender=user2)
+
+    # Deposit to staker
+    amt = 5_000 * 10 ** 18
+    staker.deposit(amt, sender=user)
+    staker.deposit(amt, sender=user2)
+
+    staker.setElection(7_500, sender=user)
+    staker.setElection(2_500, sender=user2)
+
+    # Deposit to rewards
+    amt = 1_000 * 10 ** 18
+
+    gov_token.approve(rewards, 2**256-1, sender=fee_receiver)
+    stable_token.approve(rewards, 2**256-1, sender=fee_receiver)
+    rewards.depositRewards(amt, amt, sender=fee_receiver)
+    
+    week = rewards.getWeek()
+    assert amt == rewards.weeklyRewardInfo(week).amountToken1
+    assert amt == rewards.weeklyRewardInfo(week).amountToken2
+
+    # Attempt a claim
+    with ape.reverts():
+        tx = rewards.claim(sender=user)
+
+    assert rewards.getClaimableAt(user,0).amountToken1 == 0
+    assert rewards.getClaimableAt(user,0).amountToken2 == 0
+    assert rewards.getClaimableAt(user,1).amountToken1 == 0
+    assert rewards.getClaimableAt(user,1).amountToken2 == 0
+
+    chain.pending_timestamp += WEEK
+    chain.mine()
+
+    # Week 1: Deposit to rewards
+    staker.setElection(5_500, sender=user2)
+
+    weeks = 5
+    for i in range(weeks):
+        amt = i * 500 * 10 ** 18
+        if i == 0:
+            amt = 500 * 10 ** 18
+        rewards.depositRewards(amt, amt, sender=fee_receiver_acc)
+        week = rewards.getWeek()
+        assert amt == rewards.weeklyRewardInfo(week).amountToken1
+        assert amt == rewards.weeklyRewardInfo(week).amountToken2
+        chain.pending_timestamp += WEEK
+        chain.mine()
+    
+    current_week = rewards.getWeek()
+    assert rewards.getClaimableAt(user, current_week - 1).amountToken2 > 0
+    assert rewards.getClaimableAt(user2, current_week -1).amountToken2 > 0
+    assert rewards.getClaimableAt(user, current_week - 2).amountToken1 > 0
+    assert rewards.getClaimableAt(user2, current_week - 2).amountToken1 > 0
+
+    a, b = rewards.getSuggestedClaimRange(user)
+    tx = rewards.claimWithRange(a, b, sender=user)
+    a, b = rewards.getSuggestedClaimRange(user2)
+    tx = rewards.claimWithRange(a, b, sender=user2)
+
+    stable_bal = stable_token.balanceOf(rewards)/1e18
+    gov_bal = yprisma.balanceOf(rewards)/1e18
+    assert stable_bal < 4000
+    
+
+def test_getters(user, accounts, staker, gov, user2, yprisma, rewards):
+    assert staker.approvedWeightedDepositor(rewards) == False
+    idx = rewards.weightedDepositIndex()
+    is_auto, weeks = rewards.getAccountAutoStake(user)
+    assert is_auto == False
+    assert weeks == idx
+
+    with ape.reverts():
+        rewards.setWeightedDepositIndex(6, sender=gov)
+    
+    idx = 3
+    rewards.setWeightedDepositIndex(idx, sender=gov)
+    is_auto, weeks = rewards.getAccountAutoStake(user)
+    assert is_auto == False
+    assert weeks == idx
+
+    rewards.setAutoStake(True, sender=user)
+    is_auto, weeks = rewards.getAccountAutoStake(user)
+    assert is_auto == False
+
+    owner = accounts[staker.owner()]
+    staker.setWeightedDepositor(rewards, True, sender=owner)
+    is_auto, weeks = rewards.getAccountAutoStake(user)
+    assert is_auto == True
+    assert weeks == 3
+

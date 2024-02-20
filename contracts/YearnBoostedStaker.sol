@@ -63,7 +63,6 @@ contract YearnBoostedStaker {
         DepositOnly,        // 1. Approved for deposit only
         WithdrawOnly,       // 2. Approved for withdrawal only
         DepositAndWithdraw  // 3. Approved for both deposit and withdrawal
-        
     }
 
     event Deposit(address indexed account, uint indexed week, uint amount, uint newUserWeight, uint weightAdded);

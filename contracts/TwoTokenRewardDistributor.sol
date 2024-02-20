@@ -154,8 +154,7 @@ contract TwoTokenRewardDistributor is WeekStart {
     ) internal returns (uint amountToken1, uint amountToken2) {
         AccountInfo memory info = accountInfo[_account];
         // Sanitize inputs
-        if (_claimStartWeek < START_WEEK) _claimStartWeek = START_WEEK;
-        if (_claimStartWeek < info.lastClaimWeek) _claimStartWeek = info.lastClaimWeek;
+        _claimStartWeek = info.lastClaimWeek == 0 ? START_WEEK : info.lastClaimWeek;
         uint currentWeek = getWeek();
         require(_claimStartWeek <= _claimEndWeek, "claimStartWeek > claimEndWeek");
         require(_claimEndWeek < currentWeek, "claimEndWeek >= currentWeek");
@@ -250,7 +249,7 @@ contract TwoTokenRewardDistributor is WeekStart {
         bool canClaim;
         uint lastClaimWeek = accountInfo[_account].lastClaimWeek;
         
-        claimStartWeek = START_WEEK > lastClaimWeek ? START_TIME : lastClaimWeek;
+        claimStartWeek = START_WEEK > lastClaimWeek ? START_WEEK : lastClaimWeek;
 
         // Loop from old towards recent.
         for (claimStartWeek; claimStartWeek <= currentWeek; claimStartWeek++) {
