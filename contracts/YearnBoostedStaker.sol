@@ -220,9 +220,7 @@ contract YearnBoostedStaker {
         else {
             acctData.pendingStake += uint104(weight);
 
-            WeightData memory data;
-            
-            data = globalGrowthRate;
+            WeightData memory data = globalGrowthRate;
             data.weight += weight;
             data.weightedElection += (weight * acctData.election);
             globalGrowthRate = data;
@@ -304,8 +302,7 @@ contract YearnBoostedStaker {
         accountData[_account] = acctData;
         
         // Global Growth Rate
-        WeightData memory data;
-        data = globalGrowthRate;
+        WeightData memory data = globalGrowthRate;
         data.weight -= pendingRemoved;
         data.weightedElection -= (pendingRemoved * acctData.election);
         globalGrowthRate = data;
