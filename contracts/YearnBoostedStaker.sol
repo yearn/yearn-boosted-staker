@@ -7,7 +7,6 @@ interface IToken {
     function decimals() external view returns(uint8);
 }
 
-
 contract YearnBoostedStaker {
     using SafeERC20 for IERC20;
 

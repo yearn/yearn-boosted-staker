@@ -247,24 +247,79 @@ def test_claim_to_staker(user, accounts, staker, gov, user2, yprisma, yvmkusd, r
     u2_weight = staker.getAccountWeight(user2).weight
     assert u_weight > u2_weight # user weight should be higher since he is auto-staking
 
-def test_claim_blocked_in_current_week(user, accounts, staker, gov, user2, yprisma, rewards, setup_rewards):
-    assert False
-    pass
+def test_multiple_deposits_in_week(user, accounts, staker, gov, user2, yprisma, gov_token, stable_token,rewards, fee_receiver, setup_rewards):
+    amt = 1_000 * 10 ** 18
+    
+    week = rewards.getWeek()
+    
+    amt1 = rewards.weeklyRewardInfo(week).amountToken1
+    amt2 = rewards.weeklyRewardInfo(week).amountToken2
+    rewards.depositRewards(amt, amt, sender=fee_receiver)
+    assert amt1 < rewards.weeklyRewardInfo(week).amountToken1
+    assert amt2 < rewards.weeklyRewardInfo(week).amountToken2
+    amt1 = rewards.weeklyRewardInfo(week).amountToken1
+    amt2 = rewards.weeklyRewardInfo(week).amountToken2
+    rewards.depositRewards(amt, amt, sender=fee_receiver)
+    assert amt1 < rewards.weeklyRewardInfo(week).amountToken1
+    assert amt2 < rewards.weeklyRewardInfo(week).amountToken2
 
-def test_multiple_deposits_in_week(user, accounts, staker, gov, user2, yprisma):
-    pass
+    assert stable_token.balanceOf(rewards) > 0
+    assert gov_token.balanceOf(rewards) > 0
 
-def test_get_suggested_week(user, accounts, staker, gov, user2, yprisma):
-    pass
+    chain.pending_timestamp += WEEK
+    chain.mine()
 
-def check_invariants(user, accounts, staker, gov, user2, yprisma):
-    pass
+    rewards.claim(sender=user)
+    rewards.claim(sender=user2)
+
+    assert stable_token.balanceOf(rewards) == 0
+    assert gov_token.balanceOf(rewards) == 0
+
+def test_get_suggested_week(user, accounts, staker, gov, user2, yprisma, rewards,fee_receiver, setup_rewards):
+    amt = 1000 * 10 ** 18
+    assert rewards.getSuggestedClaimRange(user).claimStartWeek == 0
+    assert rewards.getSuggestedClaimRange(user).claimEndWeek == 0
+
+    weeks = 2
+    for i in range(weeks):
+        chain.pending_timestamp += WEEK
+        chain.mine()
+        rewards.depositRewards(amt, amt, sender=fee_receiver)
+
+    assert rewards.getSuggestedClaimRange(user).claimStartWeek == 0
+    assert rewards.getSuggestedClaimRange(user).claimEndWeek == weeks - 1
 
 def test_prevent_limit_claim_from_lowering_last_claim_week():
     pass
 
-def test_zero_weight_in_bucket():
-    pass
+def test_zero_weight_in_bucket(user, accounts, staker, gov, user2, yprisma, rewards,fee_receiver, gov_token, stable_token):
+    """
+    Expected behavior is return of 0, no revert on view functions.
+    """
+    assert rewards.getSuggestedClaimRange(user).claimStartWeek == 0
+    assert rewards.getSuggestedClaimRange(user).claimEndWeek == 0
+
+    amt = 100 * 10 ** 18
+    rewards.depositRewards(amt, amt, sender=fee_receiver)
+
+    chain.pending_timestamp += WEEK
+    chain.mine()
+    
+    assert rewards.getClaimableAt(user, 0).amountToken1 == 0
+    assert rewards.getClaimableAt(user, 0).amountToken2 == 0
+
+    tx = rewards.claimWithRange(0,0,sender=user)
+
+    yprisma.approve(staker, 2**256-1, sender=user)
+    amt = 10_000 * 10 ** 18
+    staker.deposit(amt, sender=user)
+    staker.setElection(10_000, sender=user)
+    rewards.depositRewards(amt, amt, sender=fee_receiver)
+
+    chain.pending_timestamp += WEEK
+    chain.mine()
+
+    tx = rewards.claim(sender=user)
 
 def test_governance_seize_tokens_when_zero_weight():
     pass
@@ -362,7 +417,7 @@ def test_claims_when_start_week_is_set_gt_zero(
     
 
 def test_getters(user, accounts, staker, gov, user2, yprisma, rewards):
-    assert staker.approvedWeightedDepositor(rewards) == False
+    assert staker.approvedWeightedDepositor(user) == False
     idx = rewards.weightedDepositIndex()
     is_auto, weeks = rewards.getAccountAutoStake(user)
     assert is_auto == False

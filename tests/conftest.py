@@ -153,7 +153,7 @@ def fee_receiver_acc(rewards, accounts, gov_token, stable_token):
     stable_token.approve(rewards, 2**256-1, sender=fr_account)
     yield fr_account
 
-@pytest.fixture(scope="session")
+@pytest.fixture(scope="function")
 def setup_rewards(user, accounts, staker, gov, user2, yprisma, yvmkusd, rewards, fee_receiver):
     fr_account = accounts[fee_receiver.address]
     fr_account.balance += 20 ** 18

@@ -143,7 +143,8 @@ contract TwoTokenRewardDistributor is WeekStart {
         @param _claimEndWeek The max week in which to search for an claim rewards.
         @dev    IMPORTANT: Choosing a `_claimStartWeek` that is greater than the earliest week in which a user
                 may claim. Will result in the user being locked out (total loss) of rewards for any weeks prior.
-        @dev    Useful to target specific weeks with known reward amounts. Claiming via this function will tend to be more gas efficient when used with values from `getSuggestedClaimRange`.
+        @dev    Useful to target specific weeks with known reward amounts. Claiming via this function will tend 
+                to be more gas efficient when used with values from `getSuggestedClaimRange`.
     */
     function claimWithRangeFor(
         address _account,
