@@ -15,7 +15,7 @@ contract TwoTokenRewardDistributor is WeekStart {
     IERC20 public immutable token1;
     IERC20 public immutable token2;
     uint public immutable START_WEEK;
-    address public gov;
+    address public owner;
     uint public weightedDepositIndex;
 
     struct RewardInfo {
@@ -24,6 +24,7 @@ contract TwoTokenRewardDistributor is WeekStart {
     }
 
     struct AccountInfo {
+        address recipient; // Who rewards will be sent to. Cheaper to store here than in dedicated mapping.
         bool autoStake;
         uint64 lastClaimWeek;
     }
@@ -35,28 +36,28 @@ contract TwoTokenRewardDistributor is WeekStart {
     
     event RewardDeposited(uint indexed week, address indexed depositor, uint amountToken11, uint amountToken2);
     event RewardsClaimed(address indexed account, uint indexed week, uint amountToken11, uint amountToken2);
-    event AutoStakeSet(address indexed account, bool indexed autoStake);
+    event AccountConfigured(address indexed account, address recipient, bool indexed autoStake);
     event WeightedDepositIndexSet(uint indexed idx);
-    event GovernanceSet(address indexed gov);
+    event OwnerSet(address indexed owner);
 
     /**
         @notice Allow permissionless deposits to the current week.
         @param _staker the staking contract to use for weight calculations.
         @param _token1 must be the stake token used by the staking contract.
         @param _token2 additional reward token.
-        @param _gov account with ability to enabled weighted staker deposits.
+        @param _owner account with ability to enabled weighted staker deposits.
     */
     constructor(
         IYearnBoostedStaker _staker,
         IERC20 _token1, 
         IERC20 _token2,
-        address _gov
+        address _owner
     )
         WeekStart(_staker) {
         staker = _staker;
         token1 = _token1;
         token2 = _token2;
-        gov = _gov;
+        owner = _owner;
         START_WEEK = staker.getWeek();
         token1.approve(address(staker), type(uint).max);
     }
@@ -83,7 +84,7 @@ contract TwoTokenRewardDistributor is WeekStart {
     function _depositRewards(address _target, uint _amountToken1, uint _amountToken2) internal {
         uint week = getWeek();
 
-        RewardInfo memory info = weeklyRewardInfo[week];
+        RewardInfo storage info = weeklyRewardInfo[week];
         if (_amountToken1 > 0) {
             token1.transferFrom(_target, address(this), _amountToken1);
             info.amountToken1 += uint128(_amountToken1);
@@ -92,8 +93,6 @@ contract TwoTokenRewardDistributor is WeekStart {
             token2.transferFrom(_target, address(this), _amountToken2);
             info.amountToken2 += uint128(_amountToken2);
         }
-
-        weeklyRewardInfo[week] = info;
         
         emit RewardDeposited(week, _target, _amountToken1, _amountToken2);
     }
@@ -125,7 +124,10 @@ contract TwoTokenRewardDistributor is WeekStart {
 
     /**
         @notice Claim rewards within a range of specified past weeks.
-        @dev    Useful to target specific weeks with known reward amounts.
+        @param _claimStartWeek the min week to search and rewards.
+        @param _claimEndWeek the max week in which to search for an claim rewards.
+        @dev    IMPORTANT: Choosing a `_claimStartWeek` that is greater than the earliest week in which a user
+                may claim. Will result in the user being locked out (total loss) of rewards for any weeks prior.
     */
     function claimWithRange(
         uint _claimStartWeek,
@@ -136,6 +138,11 @@ contract TwoTokenRewardDistributor is WeekStart {
 
     /**
         @notice Claim on behalf of another account for a range of specified past weeks.
+        @param _account Account of which to make the claim on behalf of.
+        @param _claimStartWeek The min week to search and rewards.
+        @param _claimEndWeek The max week in which to search for an claim rewards.
+        @dev    IMPORTANT: Choosing a `_claimStartWeek` that is greater than the earliest week in which a user
+                may claim. Will result in the user being locked out (total loss) of rewards for any weeks prior.
         @dev    Useful to target specific weeks with known reward amounts. Claiming via this function will tend to be more gas efficient when used with values from `getSuggestedClaimRange`.
     */
     function claimWithRangeFor(
@@ -152,7 +159,9 @@ contract TwoTokenRewardDistributor is WeekStart {
         uint _claimStartWeek,
         uint _claimEndWeek
     ) internal returns (uint amountToken1, uint amountToken2) {
-        AccountInfo memory info = accountInfo[_account];
+
+        AccountInfo storage info = accountInfo[_account];
+
         // Sanitize inputs
         _claimStartWeek = info.lastClaimWeek == 0 ? START_WEEK : info.lastClaimWeek;
         uint currentWeek = getWeek();
@@ -160,6 +169,11 @@ contract TwoTokenRewardDistributor is WeekStart {
         require(_claimEndWeek < currentWeek, "claimEndWeek >= currentWeek");
         require(_claimStartWeek >= info.lastClaimWeek, "claimStartWeek too low");
         (amountToken1, amountToken2) = _getTotalClaimableByRange(_account, _claimStartWeek, _claimEndWeek);
+        
+        _claimEndWeek += 1;
+        info.lastClaimWeek = uint64(_claimEndWeek);
+        address recipient = info.recipient == address(0) ? _account : info.recipient;
+        
         if (amountToken1 > 0) {
             if (info.autoStake) {
                 if (staker.approvedWeightedDepositor(address(this))) {
@@ -170,13 +184,10 @@ contract TwoTokenRewardDistributor is WeekStart {
                 }
             }
             else{
-                token1.transfer(_account, amountToken1);
+                token1.transfer(recipient, amountToken1);
             }
         }
-        if (amountToken2 > 0) token2.transfer(_account, amountToken2);
-        _claimEndWeek += 1;
-        info.lastClaimWeek = uint64(_claimEndWeek);
-        accountInfo[_account] = info;
+        if (amountToken2 > 0) token2.transfer(recipient, amountToken2);
         if (amountToken1 > 0 || amountToken2 > 0) {
             emit RewardsClaimed(_account, _claimEndWeek, amountToken1, amountToken2);
         }
@@ -184,7 +195,9 @@ contract TwoTokenRewardDistributor is WeekStart {
 
     /**
         @notice Helper function used to determine overal share of rewards at a particular week.
-        @dev Results scaled to PRECSION.
+        @dev    Computing shares in past weeks is accurate. However, current week computations will not accurate 
+                as week the is not yet finalized.
+        @dev    Results scaled to PRECSION.
     */
     function computeSharesAt(address _account, uint _week) public view returns (uint token1Share, uint token2Share) {
         require(_week <= getWeek(), "Invalid week");
@@ -312,35 +325,40 @@ contract TwoTokenRewardDistributor is WeekStart {
     }
 
     /**
-        @notice User may choose to autostake all of their token1 rewards directly into the staking contract.
-        @dev    This function is designed to be called prior to ranged claims to shorted the number of iterations
-                required to loop if possible.
+        @notice User may configure their account to set a custom token recipient and/or autostake all of their 
+                token1 rewards directly into the staking contract.
+        @param _recipient   Wallet to receive tokens on behalf of the account. Zero address will result in all tokens
+                            being transferred directly to the account holder.
+        @param _autoStake   If true, the rewards contract is instructed to deposit yield directly to the staker at
+                            the extra boosted weight index if enabled.
     */
-    function setAutoStake(bool _autoStake) external {
-        accountInfo[msg.sender].autoStake = _autoStake;
-        emit AutoStakeSet(msg.sender, _autoStake);
+    function configureAccount(address _recipient, bool _autoStake) external {
+        AccountInfo storage info = accountInfo[msg.sender];
+        info.recipient = _recipient;
+        info.autoStake = _autoStake;
+        emit AccountConfigured(msg.sender, _recipient, _autoStake);
     }
 
     /**
-        @notice Used by governance to control instant boost level of weighted deposits.
+        @notice Used by owner to control instant boost level of weighted deposits.
         @dev    Supplying an idx of 0 is least weighted. Max available index is equal to MAX_STAKE_GROWTH_WEEKS
                 value in the staker, and amounts to instant full boost.
         @param _idx The index that all weighted deposits should use.
     */
     function setWeightedDepositIndex(uint _idx) external {
-        require(msg.sender == gov);
+        require(msg.sender == owner);
         require(_idx <= staker.MAX_STAKE_GROWTH_WEEKS(), "too high");
         weightedDepositIndex = _idx;
         emit WeightedDepositIndexSet(_idx);
     }
 
     /**
-        @notice Set new governance address.
-        @param _gov New governance address
+        @notice Set new owner address.
+        @param _owner New owner address
     */
-    function setGovernance(address _gov) external {
-        require(msg.sender == gov);
-        gov = _gov;
-        emit GovernanceSet(_gov);
+    function setOwner(address _owner) external {
+        require(msg.sender == owner);
+        owner = _owner;
+        emit OwnerSet(_owner);
     }
 }

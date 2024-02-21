@@ -152,3 +152,33 @@ def fee_receiver_acc(rewards, accounts, gov_token, stable_token):
     gov_token.approve(rewards, 2**256-1, sender=fr_account)
     stable_token.approve(rewards, 2**256-1, sender=fr_account)
     yield fr_account
+
+@pytest.fixture(scope="session")
+def setup_rewards(user, accounts, staker, gov, user2, yprisma, yvmkusd, rewards, fee_receiver):
+    fr_account = accounts[fee_receiver.address]
+    fr_account.balance += 20 ** 18
+    yprisma.approve(staker, 2**256-1, sender=user)
+    yprisma.approve(staker, 2**256-1, sender=user2)
+    yprisma.approve(rewards, 2**256-1, sender=fr_account)
+    yvmkusd.approve(rewards, 2**256-1, sender=fr_account)
+
+    # Deposit to staker
+    amt = 10_000 * 10 ** 18
+    staker.deposit(amt, sender=user)
+    staker.deposit(amt, sender=user2)
+
+    staker.setElection(7_500, sender=user)
+    staker.setElection(2_500, sender=user2)
+
+    # Enable deposits
+    owner = accounts[staker.owner()]
+    owner.balance += 10**18
+    staker.setWeightedDepositor(rewards, True, sender=owner)
+    rewards.configureAccount(ZERO_ADDRESS, True, sender=user)
+
+    # Deposit to rewards
+    amt = 10_000 * 10 ** 18
+    rewards.depositRewards(amt, amt, sender=fr_account)
+    week = rewards.getWeek()
+    assert amt == rewards.weeklyRewardInfo(week).amountToken1
+    assert amt == rewards.weeklyRewardInfo(week).amountToken2

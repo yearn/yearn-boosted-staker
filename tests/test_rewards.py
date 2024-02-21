@@ -228,7 +228,7 @@ def test_claim_to_staker(user, accounts, staker, gov, user2, yprisma, yvmkusd, r
     owner = accounts[staker.owner()]
     owner.balance += 10**18
     staker.setWeightedDepositor(rewards, True, sender=owner)
-    rewards.setAutoStake(True, sender=user)
+    rewards.configureAccount(ZERO_ADDRESS, True, sender=user)
 
     # Deposit to rewards
     amt = 1_000 * 10 ** 18
@@ -247,9 +247,8 @@ def test_claim_to_staker(user, accounts, staker, gov, user2, yprisma, yvmkusd, r
     u2_weight = staker.getAccountWeight(user2).weight
     assert u_weight > u2_weight # user weight should be higher since he is auto-staking
 
-
-def test_claim_blocked_in_current_week(user, accounts, staker, gov, user2, yprisma):
-
+def test_claim_blocked_in_current_week(user, accounts, staker, gov, user2, yprisma, rewards, setup_rewards):
+    assert False
     pass
 
 def test_multiple_deposits_in_week(user, accounts, staker, gov, user2, yprisma):
@@ -262,6 +261,12 @@ def check_invariants(user, accounts, staker, gov, user2, yprisma):
     pass
 
 def test_prevent_limit_claim_from_lowering_last_claim_week():
+    pass
+
+def test_zero_weight_in_bucket():
+    pass
+
+def test_governance_seize_tokens_when_zero_weight():
     pass
 
 def test_claims_when_start_week_is_set_gt_zero(
@@ -372,7 +377,7 @@ def test_getters(user, accounts, staker, gov, user2, yprisma, rewards):
     assert is_auto == False
     assert weeks == idx
 
-    rewards.setAutoStake(True, sender=user)
+    rewards.configureAccount(ZERO_ADDRESS, True, sender=user)
     is_auto, weeks = rewards.getAccountAutoStake(user)
     assert is_auto == False
 
