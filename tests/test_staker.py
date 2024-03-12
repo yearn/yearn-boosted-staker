@@ -13,7 +13,7 @@ def test_checkpoint_with_limit(user, accounts, staker, gov, user2, yprisma, ypri
     yprisma.approve(staker, MAX_INT, sender=user2)
     amount = 100 * 10 ** 18
     
-    staker.depositAndSetElection(amount, 10_000, sender=user)
+    staker.deposit(amount, sender=user)
     bal = staker.balanceOf(user)
     print(bal)
     print(staker.accountData(user))
@@ -34,8 +34,8 @@ def test_checkpoint_with_limit(user, accounts, staker, gov, user2, yprisma, ypri
     staker.checkpointAccountWithLimit(user, staker.getWeek(), sender=user)
 
     # Check current weight has been reset to week 0 power
-    data = staker.getAccountWeight(user)
-    assert data.weight == amount * 2.5
+    weight = staker.getAccountWeight(user)
+    assert weight == amount * 2.5
 
     staker.withdraw(amount, user, sender=user)
 
@@ -50,8 +50,6 @@ def test_sequenced_deposits_and_withdrawals(user, accounts, staker, gov, user2, 
         'grand_total': 0,
         'weighted_deposit_sum': 0,
         'weighted_deposit_count': 0,
-        'deposit_and_set_election_count': 0,
-        'deposit_and_set_election_sum': 0,
     }
     yprisma.approve(staker, MAX_INT, sender=user)
     yprisma.approve(staker, MAX_INT, sender=user2)
@@ -76,12 +74,9 @@ def test_sequenced_deposits_and_withdrawals(user, accounts, staker, gov, user2, 
     ACTIVITY = {
         0 :
             [
-                {'type': 'deposit_and_set_election', 'user': user, 'election': 1_000, 'amount': 10 * 10 ** 18},
-                {'type': 'deposit_and_set_election', 'user': user2, 'election': 10_000, 'amount': 20 * 10 ** 18},
                 {'type': 'withdrawal', 'user': user, 'amount': 0},
                 {'type': 'weighted_deposit', 'user': user, 'idx': 2, 'amount': 2 * 10 ** 18},
                 {'type': 'deposit', 'user': user, 'amount': 2},
-                {'type': 'set_election', 'user': user, 'amount': 5_000},
                 {'type': 'withdrawal', 'user': user, 'amount': 2},
                 {'type': 'deposit', 'user': user, 'amount': 10 * 10 ** 18 + 1},
                 {'type': 'deposit', 'user': user2, 'amount': 200 * 10 ** 18 + 1},
@@ -91,10 +86,7 @@ def test_sequenced_deposits_and_withdrawals(user, accounts, staker, gov, user2, 
         ,
         1 :
             [
-                {'type': 'set_election', 'user': user2, 'amount': 2_000},
                 {'type': 'deposit', 'user': user, 'amount': 100 * 10 ** 18 + 1},
-                {'type': 'set_election', 'user': user2, 'amount': 6_000},
-                {'type': 'set_election', 'user': user, 'amount': 1_000},
                 {'type': 'withdrawal', 'user': user2, 'amount': 20 * 10 ** 18 + 1},
             ]
         ,
@@ -103,7 +95,6 @@ def test_sequenced_deposits_and_withdrawals(user, accounts, staker, gov, user2, 
                 {'type': 'deposit', 'user': user, 'amount': 100 * 10 ** 18},
                 {'type': 'withdrawal', 'user': user, 'amount': 100 * 10 ** 18},
                 {'type': 'withdrawal', 'user': user2, 'amount': 60 * 10 ** 18},
-                {'type': 'deposit_and_set_election', 'user': user2, 'election': 10_000, 'amount': 20 * 10 ** 18},
             ]
         ,
         4 :
@@ -115,7 +106,6 @@ def test_sequenced_deposits_and_withdrawals(user, accounts, staker, gov, user2, 
         5 :
             [
                 {'type': 'deposit', 'user': user, 'amount': 1 * 10 ** 18},
-                {'type': 'deposit_and_set_election', 'user': user, 'election': 10_000, 'amount': 20 * 10 ** 18},
                 {'type': 'withdrawal', 'user': user2, 'amount': 1 * 10 ** 18},
                 {'type': 'weighted_deposit', 'user': user, 'idx': 2, 'amount': 2 * 10 ** 18},
             ]
@@ -130,7 +120,6 @@ def test_sequenced_deposits_and_withdrawals(user, accounts, staker, gov, user2, 
         ,
         11 :
             [
-                {'type': 'deposit_and_set_election', 'user': user2, 'election': 10_000, 'amount': 20 * 10 ** 18},
                 {'type': 'withdrawal', 'user': user, 'amount': 1 * 10 ** 18},
                 {'type': 'withdrawal', 'user': user2, 'amount': 1 * 10 ** 18},
                 {'type': 'weighted_deposit', 'user': user2, 'idx': 0, 'amount': 1 * 10 ** 18},
@@ -199,8 +188,6 @@ def test_sequenced_deposits_and_withdrawals(user, accounts, staker, gov, user2, 
             'map': [0,0,0,0,0], # each index represents a week, and item represents the pending amount
             'start_balance': yprisma.balanceOf(user.address),
             'deposited_with_weight': 0,
-            'weighted_election': 0,
-            'election': 0,
         },
         user2.address: {
             'balance_of': 0,
@@ -210,15 +197,11 @@ def test_sequenced_deposits_and_withdrawals(user, accounts, staker, gov, user2, 
             'map': [0,0,0,0,0], # each index represents a week, and item represents the pending amount
             'start_balance': yprisma.balanceOf(user2.address),
             'deposited_with_weight': 0,
-            'weighted_election': 0,
-            'election': 0,
         },
     }
 
     global_weight = 0
-    global_weighted_election = 0
     global_growth = 0
-    global_growth_weighted_election = 0
     last_week = 0
     MAX_STAKE_GROWTH_WEEKS = staker.MAX_STAKE_GROWTH_WEEKS()
 
@@ -228,7 +211,7 @@ def test_sequenced_deposits_and_withdrawals(user, accounts, staker, gov, user2, 
 
     for week_index in ACTIVITY:
         to_advance = week_index - last_week
-        user_data, global_growth, global_growth_weighted_election = advance_with_data(to_advance, staker, user_data, global_growth, global_growth_weighted_election)
+        user_data, global_growth = advance_with_data(to_advance, staker, user_data, global_growth)
         last_week = week_index
         if staker.getWeek() - start_week == week_index:
             actions = ACTIVITY[week_index]
@@ -237,71 +220,6 @@ def test_sequenced_deposits_and_withdrawals(user, accounts, staker, gov, user2, 
                     assert False
                 u = action['user']
                 amt = action['amount']
-                election = user_data[u.address]['election']
-                if action['type'] == 'set_election':
-                    new_election = action['amount']
-                    prev_election = election
-                    gain = True if prev_election < new_election else False
-                    diff = abs(prev_election - new_election)
-                    if new_election == prev_election:
-                        with ape.reverts():
-                            tx = staker.setElection(new_election, sender=u)
-                        continue
-                    weight = user_data[u.address]['weight']
-                    pending = user_data[u.address]['pending']
-                    user_data[u.address]['weighted_election'] = (weight * new_election)
-                    if gain:
-                        global_weighted_election += (weight * diff)
-                        global_growth_weighted_election += (pending * diff)
-                    else:
-                        global_weighted_election -= (weight * diff)
-                        global_growth_weighted_election -= (pending * diff)
-                    user_data[u.address]['election'] = new_election
-                    tx = staker.setElection(new_election, sender=u)
-                
-                if action['type'] == 'deposit_and_set_election':
-                    new_election = action['election']
-                    prev_election = election
-                    gain = True if prev_election < new_election else False
-                    diff = abs(prev_election - new_election)
-                    if new_election == prev_election:
-                        with ape.reverts():
-                            tx = staker.setElection(new_election, sender=u)
-                        continue
-                    weight = user_data[u.address]['weight']
-                    pending = user_data[u.address]['pending']
-                    user_data[u.address]['weighted_election'] = (weight * new_election)
-                    if gain:
-                        global_weighted_election += (weight * diff)
-                        global_growth_weighted_election += (pending * diff)
-                    else:
-                        global_weighted_election -= (weight * diff)
-                        global_growth_weighted_election -= (pending * diff)
-                    user_data[u.address]['election'] = new_election
-                    ##### Now for the deposit part
-                    election = new_election
-                    weight = amt // 2
-                    user_data[u.address]['balance_of'] += weight * 2
-                    user_data[u.address]['weight'] += weight
-                    user_data[u.address]['pending'] += weight
-                    user_data[u.address]['map'][0] += weight
-                    user_data[u.address]['weighted_election'] += (weight * election)
-                    global_weight += weight
-                    global_weighted_election += (weight * election)
-                    global_growth += weight
-                    global_growth_weighted_election += (weight * election)
-                    tx = staker.depositAndSetElection(amt, new_election, sender=u)
-                    event = list(tx.decode_logs(staker.Deposit))[0]
-                    print(f'Weight added: {event.weightAdded}')
-                    assert event.account == u.address
-                    assert event.week == staker.getWeek()
-                    assert event.amount == amt // 2 * 2
-                    data = staker.getAccountWeight(u)
-                    assert event.newUserWeight == user_data[u.address]['weight'] == data.weight
-                    assert event.weightAdded == weight
-                    gas_analysis['deposit_and_set_election_count'] += 1
-                    gas_analysis['deposit_and_set_election_sum'] += tx.gas_used
-                    gas_analysis['grand_total'] += tx.gas_used
 
                 if action['type'] == 'weighted_deposit':
                     if amt == 0:
@@ -315,25 +233,22 @@ def test_sequenced_deposits_and_withdrawals(user, accounts, staker, gov, user2, 
                     user_data[u.address]['balance_of'] += weight * 2
                     instant_weight = int(weight * (idx + 1))
                     user_data[u.address]['weight'] += instant_weight
-                    user_data[u.address]['weighted_election'] += (instant_weight * election)
                     if idx == MAX_STAKE_GROWTH_WEEKS:
                         user_data[u.address]['realized'] += weight
                     else:
                         user_data[u.address]['pending'] += weight
                         user_data[u.address]['map'][idx] += weight
                         global_growth += weight
-                        global_growth_weighted_election += (weight * election)
 
                     global_weight += instant_weight
-                    global_weighted_election += (instant_weight * election)
                     tx = staker.depositAsWeighted(u, amt, idx, sender=gov)
                     event = list(tx.decode_logs(staker.Deposit))[0]
                     print(f'Weight added: {event.weightAdded}')
                     assert event.account == u.address
                     assert event.week == staker.getWeek()
                     assert event.amount == amt
-                    data = staker.getAccountWeight(u)
-                    assert event.newUserWeight == user_data[u.address]['weight'] == data.weight
+                    acct_weight = staker.getAccountWeight(u)
+                    assert event.newUserWeight == user_data[u.address]['weight'] == acct_weight
                     assert event.weightAdded == instant_weight
                     gas_analysis['weighted_deposit_count'] += 1
                     gas_analysis['weighted_deposit_sum'] += tx.gas_used
@@ -348,19 +263,16 @@ def test_sequenced_deposits_and_withdrawals(user, accounts, staker, gov, user2, 
                     user_data[u.address]['weight'] += weight
                     user_data[u.address]['pending'] += weight
                     user_data[u.address]['map'][0] += weight
-                    user_data[u.address]['weighted_election'] += (weight * election)
                     global_weight += weight
-                    global_weighted_election += (weight * election)
                     global_growth += weight
-                    global_growth_weighted_election += (weight * election)
                     tx = staker.deposit(amt, sender=u)
                     event = list(tx.decode_logs(staker.Deposit))[0]
                     print(f'Weight added: {event.weightAdded}')
                     assert event.account == u.address
                     assert event.week == staker.getWeek()
                     assert event.amount == amt // 2 * 2
-                    data = staker.getAccountWeight(u)
-                    assert event.newUserWeight == user_data[u.address]['weight'] == data.weight
+                    acct_weight = staker.getAccountWeight(u)
+                    assert event.newUserWeight == user_data[u.address]['weight'] == acct_weight
                     assert event.weightAdded == weight
                     gas_analysis['deposit_count'] += 1
                     gas_analysis['deposit_sum'] += tx.gas_used
@@ -401,12 +313,8 @@ def test_sequenced_deposits_and_withdrawals(user, accounts, staker, gov, user2, 
                     pending_after = user_data[u.address]['pending']
                     pending_removed = pending_before - pending_after
                     user_data[u.address]['weight'] -= weight_to_reduce
-                    user_data[u.address]['weighted_election'] -= (weight_to_reduce * election)
-                    assert user_data[u.address]['weight'] * user_data[u.address]['election'] == user_data[u.address]['weighted_election']
                     global_weight -= weight_to_reduce
-                    global_weighted_election -= (weight_to_reduce * election)
                     global_growth -= pending_removed
-                    global_growth_weighted_election -= (pending_removed * election)
                     tx = staker.withdraw(amt, u, sender=u)
                     event = list(tx.decode_logs(staker.Withdraw))[0]
                     print(f'Weight removed: {event.weightRemoved}')
@@ -421,7 +329,7 @@ def test_sequenced_deposits_and_withdrawals(user, accounts, staker, gov, user2, 
                 print('⛽️', action['type'], f'{tx.gas_used:,}')
                 print_state(week_index, action, staker, user_data[u.address], u.address)
 
-            check_invariants(accounts, staker, user_data, yprisma, global_growth, global_growth_weighted_election)
+            check_invariants(accounts, staker, user_data, yprisma, global_growth)
 
     print(f'⛽️ Gas Analysis ⛽️')
     print(gas_analysis)
@@ -429,11 +337,9 @@ def test_sequenced_deposits_and_withdrawals(user, accounts, staker, gov, user2, 
     weighted_deposit_avg = gas_analysis['weighted_deposit_sum']/gas_analysis['weighted_deposit_count']
     deposit_avg = gas_analysis['deposit_sum']/gas_analysis['deposit_count']
     withdraw_avg = gas_analysis['withdrawals_sum']/gas_analysis['withdrawals_count']
-    deposit_and_set_election_avg = gas_analysis['deposit_and_set_election_sum']/gas_analysis['deposit_and_set_election_count']
     print(f'deposit_avg {deposit_avg:,.0f}')
     print(f'weighted_deposit_avg {weighted_deposit_avg:,.0f}')
     print(f'withdraw_avg {withdraw_avg:,.0f}')
-    print(f'deposit_and_set_election_avg {withdraw_avg:,.0f}')
     print(f'⛽️⛽️⛽️')
 
 def print_state(week_index, action, staker, data, user_address):
@@ -442,7 +348,7 @@ def print_state(week_index, action, staker, data, user_address):
     p = data['pending'] / 1e18
     map = [x / 1e18 for x in data['map']]
 
-    actual_w = staker.getAccountWeight(user_address).weight / 1e18
+    actual_w = staker.getAccountWeight(user_address) / 1e18
     actual_r = staker.accountData(user_address)['realizedStake'] / 1e18
     actual_p = staker.accountData(user_address)['pendingStake'] / 1e18
     actual_m = staker.accountData(user_address)['updateWeeksBitmap']
@@ -453,8 +359,7 @@ def print_state(week_index, action, staker, data, user_address):
     new_map = []
     for i, m in enumerate(actual_m):
         realize_week = staker.getWeek() + (len(actual_m) - 1 - i) # realize_week
-        data = staker.accountWeeklyToRealize(user_address, realize_week)
-        amt = data.weight
+        amt = staker.accountWeeklyToRealize(user_address, realize_week)
         new_map.append(amt/10**18)
     
     action_type = action['type']
@@ -468,14 +373,12 @@ def print_state(week_index, action, staker, data, user_address):
     print('map', map, '|', new_map)
     print('-------')
 
-def check_invariants(accounts, staker, user_data, yprisma, global_growth, global_growth_weighted_election):
+def check_invariants(accounts, staker, user_data, yprisma, global_growth):
     # user weights sum to global weight
     # each user balance is sum of his pending + realized
     sum_user_weight = 0
     total_balance = 0
-    sum_weighted_elections = Decimal(0)
     sum_pending = 0
-    sum_weighted_pending = 0
     for u in user_data:
         starting_balance = user_data[u]['start_balance']
         realized = user_data[u]['realized']
@@ -496,13 +399,7 @@ def check_invariants(accounts, staker, user_data, yprisma, global_growth, global
         assert user_balance <= starting_balance
         assert yprisma.balanceOf(u) <= starting_balance + deposited_with_weight # Make sure user never got a surplus
 
-        election = staker.accountData(u).election
-        assert election == user_data[u]['election']
-        data = staker.getAccountWeight(u)
-        assert data.weight == weight
-        assert data.weight * election == data.weightedElection
-        assert data.weight * user_data[u]['election'] == data.weightedElection
-        sum_weighted_elections += Decimal(data.weightedElection)
+        assert user_data[u]['weight'] == staker.getAccountWeight(u)
         sum_pending += user_data[u]['pending']
         p = staker.accountData(u).pendingStake
         if staker.accountData(u)['realizedStake'] != realized:
@@ -513,7 +410,6 @@ def check_invariants(accounts, staker, user_data, yprisma, global_growth, global
             staker.checkpointAccount(u, sender=accounts[u])
             p = staker.accountData(u).pendingStake
             assert staker.accountData(u)['realizedStake'] == realized
-        sum_weighted_pending += p * election
         assert staker.accountData(u)['realizedStake'] == realized
         assert staker.accountData(u)['pendingStake'] == pending
         if staker.balanceOf(u) == 0:
@@ -525,19 +421,10 @@ def check_invariants(accounts, staker, user_data, yprisma, global_growth, global
         if pending == 0 or realized == user_balance / 2:
             assert weight == realized * 5
 
-    data = staker.globalGrowthRate()
-    assert sum_pending == data.weight
-    assert sum_weighted_pending == data.weightedElection
-    assert sum_weighted_pending == global_growth_weighted_election
-    assert data.weight == global_growth
-    assert data.weightedElection == global_growth_weighted_election 
+    assert sum_pending == staker.globalGrowthRate()
 
     assert total_balance == staker.totalSupply()
-    data = staker.getGlobalWeight()
-    assert data.weight == sum_user_weight
-    assert data.weight * 10_000 >= data.weightedElection
-    assert sum_weighted_elections == Decimal(data.weightedElection)
-    print(f'🏋️‍♂️ {int(sum_weighted_elections/Decimal(1e18)/Decimal(10_000))} {data.weightedElection/1e18/10_000}')
+    assert sum_user_weight == staker.getGlobalWeight()
 
 
 def try_invalid_stuff(gov, staker, yprisma, user):
@@ -568,32 +455,28 @@ def advance(num_weeks, staker, users):
         print(f'-- Week {week} --')
         print(f'Global weight: {global_weight}')
         for u in users:
-            data = staker.getAccountWeight(u)
-            user_weight = data.weight
+            user_weight = staker.getAccountWeight(u)
             print(f'User weight: {u} {user_weight}')
         # assert global_weight == amount_sized * min(week, 8)
         # assert user_weight == amount_sized * min(week, 8)
         
-def advance_with_data(num_weeks, staker, user_data, global_growth, global_growth_weighted_election):
+def advance_with_data(num_weeks, staker, user_data, global_growth):
     for i in range(0, num_weeks):
         chain.pending_timestamp += WEEK
         chain.mine()
         for u in user_data:
             map = user_data[u]['map']
-            election = user_data[u]['election'] 
             pending = sum(map[0:4])
             user_data[u]['weight'] += pending
-            user_data[u]['weighted_election'] = user_data[u]['weight'] * election
             amt_to_realize = map[-2]
             if amt_to_realize > 0:
                 user_data[u]['pending'] -= amt_to_realize
                 user_data[u]['realized'] += amt_to_realize
                 global_growth -= amt_to_realize
-                global_growth_weighted_election -= (amt_to_realize * election)
             # write new map. shift right, inserting 0 on left, dropping number on right
             user_data[u]['map'] = [0] + map[:-1]
     
-    return user_data, global_growth, global_growth_weighted_election
+    return user_data, global_growth
 
 def test_approved_caller(staker, user, user2, rando, gov, yprisma, accounts):
     amount = 1_000 * 10 ** 18
@@ -609,15 +492,13 @@ def test_approved_caller(staker, user, user2, rando, gov, yprisma, accounts):
     staker.setApprovedCaller(user2, ApprovalStatus.DEPOSIT_ONLY, sender=user)
 
     # Deposit on behalf of user
-    data = staker.getAccountWeight(user)
-    user_before = data.weight
-    data = staker.getAccountWeight(rando)
-    rando_before = data.weight
+    user_before = staker.getAccountWeight(user)
+    rando_before = staker.getAccountWeight(rando)
     staker.depositFor(user, amount, sender=rando)
     staker.depositFor(user, amount, sender=user2)
 
-    assert user_before < staker.getAccountWeight(user).weight
-    assert rando_before == staker.getAccountWeight(rando).weight
+    assert user_before < staker.getAccountWeight(user)
+    assert rando_before == staker.getAccountWeight(rando)
 
     staker.setApprovedCaller(rando, ApprovalStatus.NONE, sender=user)
     staker.setApprovedCaller(user2, ApprovalStatus.NONE, sender=user)
@@ -628,17 +509,14 @@ def test_approved_caller(staker, user, user2, rando, gov, yprisma, accounts):
 
     # Withdraw on behalf of user
     amount = int(amount/3)
-    data = staker.getAccountWeight(user)
-    user_before = data.weight
+    user_before = staker.getAccountWeight(user)
     staker.setApprovedCaller(rando, ApprovalStatus.WITHDRAW_ONLY, sender=user)
     staker.setApprovedCaller(user2, ApprovalStatus.DEPOSIT_AND_WITHDRAW, sender=user)
-    data = staker.getAccountWeight(rando)
-    rando_before = data.weight
+    rando_before = staker.getAccountWeight(rando)
     staker.withdrawFor(user, amount, user, sender=rando)
     staker.withdrawFor(user, amount, user, sender=user2)
 
-    data = staker.getAccountWeight(user)
-    assert user_before > data.weight
+    assert user_before > staker.getAccountWeight(user)
 
     staker.setApprovedCaller(rando, ApprovalStatus.NONE, sender=user)
     staker.setApprovedCaller(user2, ApprovalStatus.DEPOSIT_ONLY, sender=user)
@@ -683,8 +561,7 @@ def test_set_weighted_depositor(staker, user, user2, rando, gov, yprisma, accoun
     tx = staker.depositAsWeighted(gov, amount, idx, sender=gov)
     event = list(tx.decode_logs(staker.Deposit))[0]
     weight = amount / 2
-    data = staker.getAccountWeight(gov)
-    new_weight = data.weight
+    new_weight = staker.getAccountWeight(gov)
     instant_weight = int(amount / 2 * (idx + 1))
     assert event.account == gov.address
     assert event.newUserWeight == new_weight
@@ -700,8 +577,7 @@ def test_set_weighted_depositor(staker, user, user2, rando, gov, yprisma, accoun
     new_map = []
     for i, m in enumerate(actual_m):
         realize_week = staker.getWeek() + (len(actual_m) - 1 - i) # realize_week
-        data = staker.accountWeeklyToRealize(gov, realize_week)
-        amt = data.weight
+        amt = staker.accountWeeklyToRealize(gov, realize_week)
         new_map.append(amt/1e18)    
     print(new_map)
     assert new_map[3] == weight / 1e18
@@ -757,93 +633,7 @@ def test_sweep(staker, user, user2, rando, gov, yprisma, dai, dai_whale):
     staker.sweep(dai, sender=gov)
     assert dai.balanceOf(gov) > before
     assert dai.balanceOf(staker) == 0
-    
 
-def test_basic_election(staker, user, yprisma):
-    amount = 50 * 10 ** 18
-    new_election = 10_000
-    yprisma.approve(staker, amount, sender=user)
-
-    # Test election with no weight
-    assert staker.getElection(user) == 0
-    assert staker.getAccountWeight(user).weightedElection == 0 
-    
-    tx = staker.setElection(new_election, sender=user)
-    event = list(tx.decode_logs(staker.ElectionSet))[0]
-    assert event.account == user.address
-    assert event.election == new_election
-    assert staker.getElection(user) == new_election
-    assert staker.getAccountWeight(user).weightedElection == 0 
-
-    tx = staker.deposit(amount, sender=user)
-    assert staker.getElection(user) == new_election
-
-    for i in range(1, 10):
-        staker.checkpointAccount(user, sender=user)
-        if i <= 5 :
-            weighted_election = scale(amount) * new_election * (i * 0.5)
-        else:
-            weighted_election = scale(amount) * new_election * 2.5
-        assert scale(staker.getAccountWeight(user).weightedElection) == float(weighted_election)
-        chain.pending_timestamp += WEEK
-        chain.mine()
-
-    tx = staker.withdraw(staker.balanceOf(user), user, sender=user)
-    assert staker.getAccountWeight(user).weightedElection == 0
-
-def test_election_change(staker, user, yprisma):
-    amount = 50 * 10 ** 18
-    new_election = 5_000
-    yprisma.approve(staker, amount, sender=user)
-
-    # Test election with no weight
-    assert staker.getElection(user) == 0
-    assert staker.getAccountWeight(user).weightedElection == 0 
-    
-    tx = staker.setElection(new_election, sender=user)
-    assert staker.getElection(user) == new_election
-    assert staker.getAccountWeight(user).weightedElection == 0 
-
-    tx = staker.deposit(amount, sender=user)
-    assert staker.getElection(user) == new_election
-
-    for i in range(1, 2):
-        staker.checkpointAccount(user, sender=user)
-        weighted_election = scale(amount) * new_election * (i * 0.5)
-        assert scale(staker.getAccountWeight(user).weightedElection) == float(weighted_election)
-
-        chain.pending_timestamp += WEEK
-        chain.mine()
-
-    data = staker.getAccountWeight(user)
-    w = data.weight
-    calculated_weight = data.weightedElection // 10**18 / new_election
-    assert data.weight // 10**18 == calculated_weight
-
-    new_election = 800
-    tx = staker.setElection(new_election, sender=user)
-    data = staker.getAccountWeight(user)
-    assert w == data.weight
-    assert calculated_weight == scale(data.weightedElection) / new_election
-    assert scale(data.weight) == scale(data.weightedElection) / new_election
-
-    tx = staker.withdraw(staker.balanceOf(user), user, sender=user)
-    assert staker.getAccountWeight(user).weightedElection == 0 
-    assert staker.getAccountWeight(user).weight == 0
-
-def test_election_no_change(staker, user):
-    new_election = 1_000
-    tx = staker.setElection(new_election, sender=user)
-    with ape.reverts():
-        tx = staker.setElection(new_election, sender=user)
-    # Test raising election
-    # Test lowering election
-    # Test setting election to same as current value
-    # Test setting election with different account
-    # Test setting election with 0 weight account
-        # Should result in no diffs
-    # Test condition where we have TVL but there is 0 total weightedElected for a given week
-    # Test that weight backfills went through as expected on checkpoint (caught a bug that slipped by original test)
 
 def test_checkpoint_abandoned_acct(staker, yprisma, user):
     """
@@ -851,18 +641,10 @@ def test_checkpoint_abandoned_acct(staker, yprisma, user):
         are updated appropriately for current and all future weeks.
     """
     amount = 50 * 10 ** 18
-    new_election = 5_000
     yprisma.approve(staker, amount, sender=user)
 
-    # Test election with no weight
-    assert staker.getElection(user) == 0
-    assert staker.getAccountWeight(user).weightedElection == 0 
-    
-    tx = staker.setElection(new_election, sender=user)
-    event = list(tx.decode_logs(staker.ElectionSet))[0]
-    assert event.account == user.address
-    assert event.election == new_election
-    assert staker.getElection(user) == new_election
+    assert staker.getAccountWeight(user) == 0 
+
     
     start_global = staker.getGlobalWeight()
     w = 0
@@ -874,17 +656,15 @@ def test_checkpoint_abandoned_acct(staker, yprisma, user):
     
 
     for i in range(weeks_to_travel + 1):
-        global_data = staker.getGlobalWeight()
+        global_weight = staker.getGlobalWeight()
         weekly_gain = amount // 2
-        data = staker.getAccountWeight(user)
+        weight = staker.getAccountWeight(user)
         if i <= 4:
             w += weekly_gain
         else:
             w = amount * 2.5
-        assert scale(global_data.weight) == scale(start_global.weight) + scale(w)
-        assert scale(global_data.weightedElection) == scale(global_data.weight) * new_election
-        assert scale(data.weightedElection) == scale(w) * new_election
-        assert scale(data.weight) == scale(w)
+        assert scale(global_weight) == scale(start_global) + scale(w)
+        assert scale(weight) == scale(w)
         chain.pending_timestamp += WEEK
         chain.mine()
 
@@ -898,8 +678,7 @@ def test_checkpoint_abandoned_acct(staker, yprisma, user):
             w += weekly_gain
         else:
             w = amount * 2.5
-        assert scale(data.weightedElection) == scale(w) * new_election
-        assert data.weight == w
+        assert data == w
 
 def scale(value):
     return value / 10 ** 18

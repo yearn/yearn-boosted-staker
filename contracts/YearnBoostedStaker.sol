@@ -15,18 +15,18 @@ contract YearnBoostedStaker {
     uint public immutable START_TIME;
     IERC20 public immutable stakeToken;
 
-    // Account weight tracking state vars
+    // Account weight tracking state vars.
     mapping(address account => AccountData data) public accountData;
-    mapping(address account => mapping(uint week => WeightData weightData)) private accountWeeklyWeights;
-    mapping(address account => mapping(uint week => WeightData weightDataToRealize)) public accountWeeklyToRealize;
+    mapping(address account => mapping(uint week => uint weight)) private accountWeeklyWeights;
+    mapping(address account => mapping(uint week => uint amount)) public accountWeeklyToRealize;
 
-    // Global weight tracking state vars
+    // Global weight tracking stats vars.
+    uint112 public globalGrowthRate;
     uint16 public globalLastUpdateWeek;
-    WeightData public globalGrowthRate;
-    mapping(uint week => WeightData weightData) private globalWeeklyWeights;
-    mapping(uint week => WeightData weightDataToRealize) public globalWeeklyToRealize;
+    mapping(uint week => uint weight) private globalWeeklyWeights;
+    mapping(uint week => uint weightToRealize) private globalWeeklyToRealize;
 
-    // Generic token interface
+    // Generic token interface.
     uint public totalSupply;
     uint8 public immutable decimals;
 
@@ -36,16 +36,11 @@ contract YearnBoostedStaker {
     mapping(address account => mapping(address caller => ApprovalStatus approvalStatus)) public approvedCaller;
     mapping(address depositor => bool approved) public approvedWeightedDepositor;
 
-    struct WeightData {
-        uint128 weight;
-        uint128 weightedElection;
-    }
-
     struct AccountData {
-        uint104 realizedStake;  // Amount of stake that has fully realized weight.
-        uint104 pendingStake;   // Amount of stake that has not yet fully realized weight.
+        uint112 realizedStake;  // Amount of stake that has fully realized weight.
+        uint112 pendingStake;   // Amount of stake that has not yet fully realized weight.
         uint16 lastUpdateWeek;  // Week of last sync.
-        uint16 election;
+
         // One byte member to represent weeks in which an account has pending weight changes.
         // A bit is set to true when the account has a non-zero token balance to be realized in
         // the corresponding week. We use this as a "map", allowing us to reduce gas consumption
@@ -69,7 +64,6 @@ contract YearnBoostedStaker {
     event ApprovedCallerSet(address indexed account, address indexed caller, ApprovalStatus status);
     event WeightedDepositorSet(address indexed depositor, bool approved);
     event OwnershipTransferred(address indexed newOwner);
-    event ElectionSet(address indexed account, uint election);
 
     /**
         @param _token The token to be staked.
@@ -105,16 +99,7 @@ contract YearnBoostedStaker {
         @param _amount Amount of tokens to deposit.
     */
     function deposit(uint _amount) external returns (uint) {
-        return _deposit(msg.sender, _amount, type(uint).max);
-    }
-
-    /**
-        @notice Deposit tokens into the staking contract.
-        @param _amount Amount of tokens to deposit.
-    */
-    function depositAndSetElection(uint _amount, uint _election) external returns (uint) {
-        require(_election <= 10_000, 'Too High');
-        return _deposit(msg.sender, _amount, _election);
+        return _deposit(msg.sender, _amount);
     }
 
     function depositFor(address _account, uint _amount) external returns (uint) {
@@ -127,56 +112,37 @@ contract YearnBoostedStaker {
             );
         }
         
-        return _deposit(_account, _amount, type(uint).max);
+        return _deposit(_account, _amount);
     }
 
-    function _deposit(address _account, uint _amount, uint _election) internal returns (uint) {
-        require(_amount > 1 && _amount < type(uint104).max >> 1, "invalid amount");
+    function _deposit(address _account, uint _amount) internal returns (uint) {
+        require(_amount > 1 && _amount < type(uint112).max, "invalid amount");
 
-        uint systemWeek = getWeek();
         // Before going further, let's sync our account and global weights
-        (AccountData memory acctData, WeightData memory accountWeightData) = _checkpointAccount(_account, systemWeek);
-        WeightData memory globalWeight = _checkpointGlobal(systemWeek);
-        if (_election != type(uint).max) {
-            (acctData, accountWeightData) = _setElection(_election, acctData, accountWeightData, systemWeek);
-            globalWeight = globalWeeklyWeights[systemWeek];
-        }
-        
-        uint128 weight = uint128(_amount >> 1);
+        uint systemWeek = getWeek();
+        (AccountData memory acctData, uint accountWeight) = _checkpointAccount(_account, systemWeek);
+        uint112 globalWeight = uint112(_checkpointGlobal(systemWeek));
+
+        uint weight = _amount >> 1;
         _amount = weight << 1; // This helps prevent balance/weight discrepencies.
-
-        acctData.pendingStake += uint104(weight);
-        uint realizeWeek = systemWeek + MAX_STAKE_GROWTH_WEEKS;
-
-        accountWeightData.weight += uint128(weight);
-        accountWeightData.weightedElection = (accountWeightData.weight * acctData.election);
-        accountWeeklyWeights[_account][systemWeek] = accountWeightData;
         
-        WeightData memory data = accountWeeklyToRealize[_account][realizeWeek];
-        data.weight += weight;
-        data.weightedElection = data.weight * acctData.election;
-        accountWeeklyToRealize[_account][realizeWeek] = data;
+        acctData.pendingStake += uint112(weight);
+        globalGrowthRate += uint112(weight);
 
-        data = globalWeeklyToRealize[realizeWeek];
-        data.weight += uint128(weight);
-        data.weightedElection += weight * acctData.election;
-        globalWeeklyToRealize[realizeWeek] = data;
+        uint realizeWeek = systemWeek + MAX_STAKE_GROWTH_WEEKS;
+        uint previous = accountWeeklyToRealize[_account][realizeWeek];
 
-        data.weight = globalWeight.weight + uint128(weight);
-        data.weightedElection = globalWeight.weightedElection + (weight * acctData.election);
-        globalWeeklyWeights[systemWeek] = data;
-
-        data = globalGrowthRate;
-        data.weight += uint128(weight);
-        data.weightedElection += uint128(weight * acctData.election);
-        globalGrowthRate = data;
-
-        acctData.updateWeeksBitmap |= 1; // Flip bit at least-weighted position.
+        // modify weekly realizations and bitmap
+        accountWeeklyToRealize[_account][realizeWeek] = previous + weight;
+        accountWeeklyWeights[_account][systemWeek] = accountWeight + weight;
+        globalWeeklyToRealize[realizeWeek] += weight;
+        globalWeeklyWeights[systemWeek] = globalWeight + weight;
+        acctData.updateWeeksBitmap |= 1; // Use bitwise or to ensure bit is flipped at least weighted position.
         accountData[_account] = acctData;
         totalSupply += _amount;
         
         stakeToken.transferFrom(msg.sender, address(this), uint(_amount));
-        emit Deposit(_account, systemWeek, _amount, accountWeightData.weight, weight);
+        emit Deposit(_account, systemWeek, _amount, accountWeight + weight, weight);
         
         return _amount;
     }
@@ -194,47 +160,30 @@ contract YearnBoostedStaker {
             "!approvedDepositor"
         );
         require(_idx <= MAX_STAKE_GROWTH_WEEKS, "Invalid week index.");
-        require(_amount > 1 && _amount < type(uint104).max, "invalid amount");
+        require(_amount > 1 && _amount < type(uint112).max, "invalid amount");
 
         // Before going further, let's sync our account and global weights
         uint systemWeek = getWeek();
-        (AccountData memory acctData, WeightData memory accountWeight) = _checkpointAccount(_account, systemWeek);
-        WeightData memory globalWeight = _checkpointGlobal(systemWeek);
+        (AccountData memory acctData, uint accountWeight) = _checkpointAccount(_account, systemWeek);
+        uint112 globalWeight = uint112(_checkpointGlobal(systemWeek));
 
-        uint128 weight = uint128(_amount >> 1);
+        uint weight = _amount >> 1;
         _amount = weight << 1;
-        uint128 instantWeight = weight * uint128(_idx + 1);
+        uint instantWeight = weight * (_idx + 1);
 
-        accountWeight.weight += instantWeight;
-        accountWeight.weightedElection = accountWeight.weight * acctData.election;
-        accountWeeklyWeights[_account][systemWeek] = accountWeight;
-
-        globalWeight.weight += instantWeight;
-        globalWeight.weightedElection += (instantWeight * acctData.election);
-        globalWeeklyWeights[systemWeek] = globalWeight;
+        accountWeeklyWeights[_account][systemWeek] = accountWeight + instantWeight;
+        globalWeeklyWeights[systemWeek] = globalWeight + instantWeight;
         
         if (_idx == MAX_STAKE_GROWTH_WEEKS) {
-            acctData.realizedStake += uint104(weight);            
+            acctData.realizedStake += uint112(weight);            
         }
         else {
-            acctData.pendingStake += uint104(weight);
-
-            WeightData memory data = globalGrowthRate;
-            data.weight += weight;
-            data.weightedElection += (weight * acctData.election);
-            globalGrowthRate = data;
-
+            acctData.pendingStake += uint112(weight);
+            globalGrowthRate += uint112(weight);
             uint realizeWeek = systemWeek + (MAX_STAKE_GROWTH_WEEKS - _idx);
-
-            data = accountWeeklyToRealize[_account][realizeWeek];
-            data.weight += weight;
-            data.weightedElection = (data.weight * acctData.election);
-            accountWeeklyToRealize[_account][realizeWeek] = data;
-
-            data = globalWeeklyToRealize[realizeWeek];
-            data.weight += weight;
-            data.weightedElection += (weight * acctData.election);
-            globalWeeklyToRealize[realizeWeek] = data;
+            uint previous = accountWeeklyToRealize[_account][realizeWeek];
+            accountWeeklyToRealize[_account][realizeWeek] = previous + weight;
+            globalWeeklyToRealize[realizeWeek] += weight;
 
             uint8 mask = uint8(1 << _idx);
             uint8 bitmap = acctData.updateWeeksBitmap;
@@ -246,19 +195,23 @@ contract YearnBoostedStaker {
         totalSupply += _amount;
 
         stakeToken.transferFrom(msg.sender, address(this), uint(_amount));
-        emit Deposit(_account, systemWeek, _amount, accountWeight.weight, instantWeight);
+        emit Deposit(_account, systemWeek, _amount, accountWeight + instantWeight, instantWeight);
 
         return _amount;
     }
 
     /**
-        @notice Remove tokens from staking contract
+        @notice Withdraw tokens from staking contract.
         @dev During partial withdrawals, this will always remove from the least-weighted first.
-     */
+    */
     function withdraw(uint _amount, address _receiver) external returns (uint) {
         return _withdraw(msg.sender, _amount, _receiver);
     }
 
+    /**
+        @notice Withdraw tokens from staking contract on behalf of another user.
+        @dev During partial withdrawals, this will always remove from the least-weighted first.
+    */
     function withdrawFor(address _account, uint _amount, address _receiver) external returns (uint) {
         if (msg.sender != _account) {
             ApprovalStatus status = approvedCaller[_account][msg.sender];
@@ -271,216 +224,87 @@ contract YearnBoostedStaker {
         return _withdraw(_account, _amount, _receiver);
     }
 
-
     function _withdraw(address _account, uint _amount, address _receiver) internal returns (uint) {
-        require(_amount > 1 && _amount < type(uint104).max, "invalid amount");
+        require(_amount > 1 && _amount < type(uint112).max, "invalid amount");
         uint systemWeek = getWeek();
 
         // Before going further, let's sync our account and global weights
-        (AccountData memory acctData, WeightData memory accountWeight)= _checkpointAccount(_account, systemWeek);
-        WeightData memory globalWeight = _checkpointGlobal(systemWeek);
+        (AccountData memory acctData, ) = _checkpointAccount(_account, systemWeek);
+        _checkpointGlobal(systemWeek);
 
-        uint128 amountNeeded = uint128(_amount >> 1);
-        _amount = amountNeeded << 1; // This helps prevent balance/weight discrepancies.
-
-        // Perform withdrawal logic
-        uint128 weightToRemove;
-
-        (weightToRemove, acctData, amountNeeded) = _performWithdraw(_account, acctData, systemWeek, amountNeeded);
-
-        uint128 pendingRemoved = uint128(_amount >> 1) - amountNeeded;
-        if (amountNeeded > 0) {
-            weightToRemove += amountNeeded * uint128(1 + MAX_STAKE_GROWTH_WEEKS);
-            acctData.realizedStake -= uint104(amountNeeded);
-            acctData.pendingStake = 0;
-        }
-        else{
-            acctData.pendingStake -= uint104(pendingRemoved);
-        }
-
-        accountData[_account] = acctData;
-        
-        // Global Growth Rate
-        WeightData memory data = globalGrowthRate;
-        data.weight -= pendingRemoved;
-        data.weightedElection -= (pendingRemoved * acctData.election);
-        globalGrowthRate = data;
-        
-        // Global Weight
-        globalWeight.weight -= weightToRemove;
-        globalWeight.weightedElection -= (weightToRemove * acctData.election);
-        globalWeeklyWeights[systemWeek] = globalWeight;
-
-        // Account Weight
-        accountWeight.weight -= weightToRemove;
-        accountWeight.weightedElection = accountWeight.weight * acctData.election;
-        accountWeeklyWeights[_account][systemWeek] = accountWeight;
-        
-        totalSupply -= _amount;
-
-        emit Withdraw(_account, systemWeek, _amount, accountWeight.weight, weightToRemove);
-        
-        stakeToken.transfer(_receiver, _amount);
-
-        return _amount;
-    }
-
-    /**
-        @dev Split from main withdraw function to avoid stack too deep.
-    */
-    function _performWithdraw(
-        address _account, 
-        AccountData memory acctData, 
-        uint systemWeek, 
-        uint128 amountNeeded
-    ) internal returns (
-        uint128 weightToRemove, 
-        AccountData memory, // acctData
-        uint128             // amountNeeded
-    ) {
+        // Here we do work to withdraw from most recent (least weighted) deposits first
         uint8 bitmap = acctData.updateWeeksBitmap;
+        uint weightToRemove;
+
+        uint amountNeeded = _amount >> 1;
+        _amount = amountNeeded << 1; // This helps prevent balance/weight discrepencies.
+
         if (bitmap > 0) {
-            WeightData memory data;
-            for (uint128 weekIndex; weekIndex < MAX_STAKE_GROWTH_WEEKS;) {
+            for (uint weekIndex; weekIndex < MAX_STAKE_GROWTH_WEEKS;) {
                 // Move right to left, checking each bit if there's an update for corresponding week.
                 uint8 mask = uint8(1 << weekIndex);
                 if (bitmap & mask == mask) {
                     uint weekToCheck = systemWeek + MAX_STAKE_GROWTH_WEEKS - weekIndex;
-                    data = accountWeeklyToRealize[_account][weekToCheck];
-                    uint128 pending = data.weight;
+                    uint pending = accountWeeklyToRealize[_account][weekToCheck];
                     
                     if (amountNeeded > pending){
                         weightToRemove += pending * (weekIndex + 1);
-
-                        accountWeeklyToRealize[_account][weekToCheck] = WeightData({
-                            weight: 0,
-                            weightedElection: 0
-                        });
-
-                        data = globalWeeklyToRealize[weekToCheck];
-                        data.weight -= pending;
-                        data.weightedElection -= (pending * acctData.election);
-                        globalWeeklyToRealize[weekToCheck] = data;
-
+                        accountWeeklyToRealize[_account][weekToCheck] = 0;
+                        globalWeeklyToRealize[weekToCheck] -= pending;
                         bitmap = bitmap ^ mask;
                         amountNeeded -= pending;
                     }
                     else { 
-                        // handle the case where we have more pending at this week than needed
-                        weightToRemove += amountNeeded * uint128(weekIndex + 1);
-                        // Update account. We already cached accountWeeklyToRealize as data above.
-                        data.weight -= amountNeeded;
-                        data.weightedElection = data.weight * acctData.election;
-                        accountWeeklyToRealize[_account][weekToCheck] = data;
-                        // Update global
-                        data = globalWeeklyToRealize[weekToCheck];
-                        data.weight -= amountNeeded;
-                        data.weightedElection -= (amountNeeded * acctData.election);
-                        globalWeeklyToRealize[weekToCheck] = data;
+                        // handle the case where we have more pending than needed
+                        weightToRemove += amountNeeded * (weekIndex + 1);
+                        accountWeeklyToRealize[_account][weekToCheck] -= amountNeeded;
+                        globalWeeklyToRealize[weekToCheck] -= amountNeeded;
                         if (amountNeeded == pending) bitmap = bitmap ^ mask;
                         amountNeeded = 0;
                         break;
                     }
                 }
-                unchecked{ weekIndex++; }
+                unchecked{weekIndex++;}
             }
             acctData.updateWeeksBitmap = bitmap;
         }
-
-        return (weightToRemove, acctData, amountNeeded);
-    }
-
-
-    /**
-        @notice Set an election amount for an account. Expressed in BPS, to be consumed by external rewards distributors.
-        @dev Elections are set in current week forward. Do not impact previous week.
-    */
-    function setElection(uint _election) external {
-        require(_election <= 10_000, 'Too High');
-
-        uint systemWeek = getWeek();
-        // Sync all weights
-        (AccountData memory acctData, WeightData memory data)= _checkpointAccount(msg.sender, systemWeek);
-        (WeightData memory globalData)= _checkpointGlobal(getWeek());
-        (acctData, data) = _setElection(_election, acctData, data, systemWeek);
-
-        accountData[msg.sender] = acctData;
-        accountWeeklyWeights[msg.sender][systemWeek] = data;
-    }
         
-    function _setElection(
-        uint _election, 
-        AccountData memory acctData, 
-        WeightData memory accountWeightData, 
-        uint systemWeek
-    ) internal returns (
-        AccountData memory, // acctData
-        WeightData memory   // Account weekly data
-    ) {
-        require(acctData.election != _election, "!Election Change");
-
-        uint16 prevElection = acctData.election;
-        acctData.election = uint16(_election);
-
-        if (accountWeightData.weight == 0) {
-            emit ElectionSet(msg.sender, _election);
-            return (acctData, accountWeightData);
+        uint pendingRemoved = (_amount >> 1) - amountNeeded;
+        if (amountNeeded > 0) {
+            weightToRemove += amountNeeded * (1 + MAX_STAKE_GROWTH_WEEKS);
+            acctData.realizedStake -= uint112(amountNeeded);
+            acctData.pendingStake = 0;
+        }
+        else{
+            acctData.pendingStake -= uint112(pendingRemoved);
         }
         
-        // Update AccountWeekly - past already done via checkpoint. Need just this week.
-        accountWeightData.weightedElection = uint128(accountWeightData.weight * _election);
+        accountData[_account] = acctData;
 
-        bool increase = _election > prevElection;
-        uint128 diff;
-        if (increase) {
-            diff = uint128(_election - prevElection);
-            globalWeeklyWeights[systemWeek].weightedElection += accountWeightData.weight * diff;
-            globalGrowthRate.weightedElection += (acctData.pendingStake * diff);
-        }
-        else {
-            diff = uint128(prevElection - _election);
-            globalWeeklyWeights[systemWeek].weightedElection -= accountWeightData.weight * diff;
-            globalGrowthRate.weightedElection -= (acctData.pendingStake * diff);
-        }
+        globalGrowthRate -= uint112(pendingRemoved);
+        globalWeeklyWeights[systemWeek] -= weightToRemove;
+        uint newAccountWeight = accountWeeklyWeights[_account][systemWeek] - weightToRemove;
+        accountWeeklyWeights[_account][systemWeek] = newAccountWeight;
         
-        uint8 bitmap = acctData.updateWeeksBitmap;
+        totalSupply -= _amount;
 
-        if (bitmap > 0) {
-            WeightData memory data;
-            // Loop through all weeks to locate any necessary updates.
-            for (uint128 weekIndex; weekIndex < MAX_STAKE_GROWTH_WEEKS;) {
-                uint8 mask = uint8(1 << weekIndex);
-                if (bitmap & mask == mask) {
-                    uint weekToCheck = systemWeek + MAX_STAKE_GROWTH_WEEKS - weekIndex;
-                    data = accountWeeklyToRealize[msg.sender][weekToCheck];
-                    uint128 w = data.weight;
-                    data.weightedElection = uint128(w * _election);
-                    accountWeeklyToRealize[msg.sender][weekToCheck] = data;
-                    if (increase) {
-                        globalWeeklyToRealize[weekToCheck].weightedElection += (w * diff);
-                    }
-                    else {
-                        globalWeeklyToRealize[weekToCheck].weightedElection -= (w * diff);
-                    }
-                }
-                unchecked { weekIndex++; }
-            }
-        }
-
-        emit ElectionSet(msg.sender, _election);
-        return (acctData, accountWeightData);
+        emit Withdraw(_account, systemWeek, _amount, newAccountWeight, weightToRemove);
+        
+        stakeToken.transfer(_receiver, _amount);
+        
+        return _amount;
     }
     
     /**
         @notice Get the current realized weight for an account
         @param _account Account to checkpoint.
-        @return acctData Current account data.
-        @return weightData Current account weightData.
+        @return acctData Most recent account data written to storage.
+        @return weight Most current account weight.
         @dev Prefer to use this function over it's view counterpart for
              contract -> contract interactions.
     */
-    function checkpointAccount(address _account) external returns (AccountData memory acctData, WeightData memory weightData) {
-        (acctData, weightData) = _checkpointAccount(_account, getWeek());
+    function checkpointAccount(address _account) external returns (AccountData memory acctData, uint weight) {
+        (acctData, weight) = _checkpointAccount(_account, getWeek());
         accountData[_account] = acctData;
     }
 
@@ -489,27 +313,19 @@ contract YearnBoostedStaker {
         @dev    To use in the event that significant number of weeks have passed since last 
                 heckpoint and single call becomes too expensive.
         @param _account Account to checkpoint.
-        @param _week Week which we
-        @return acctData Current account data.
-        @return weightData Current account weightData.
+        @param _week Week which we want to checkpoint to.
+        @return acctData Most recent account data written to storage.
+        @return weight Account weight for provided week.
     */
-    function checkpointAccountWithLimit(address _account, uint _week) external returns (AccountData memory acctData, WeightData memory weightData) {
+    function checkpointAccountWithLimit(address _account, uint _week) external returns (AccountData memory acctData, uint weight) {
         uint systemWeek = getWeek();
         if (_week >= systemWeek) _week = systemWeek;
-        
-        (acctData, weightData) = _checkpointAccount(_account, _week);
+        (acctData, weight) = _checkpointAccount(_account, _week);
         accountData[_account] = acctData;
     }
 
-    function _checkpointAccount(
-        address _account, 
-        uint _systemWeek
-    ) internal returns (
-        AccountData memory acctData, 
-        WeightData memory data
-    ) {
+    function _checkpointAccount(address _account, uint _systemWeek) internal returns (AccountData memory acctData, uint weight){
         acctData = accountData[_account];
-
         uint lastUpdateWeek = acctData.lastUpdateWeek;
 
         if (_systemWeek == lastUpdateWeek) {
@@ -518,107 +334,98 @@ contract YearnBoostedStaker {
 
         require(_systemWeek > lastUpdateWeek, "specified week is older than last update.");
 
-        uint104 pending = acctData.pendingStake; // deposited weight still growing.
-        uint104 realized = acctData.realizedStake;
-
-        WeightData memory data;
+        uint pending = uint(acctData.pendingStake);
+        uint realized = acctData.realizedStake;
 
         if (pending == 0) {
             if (realized != 0) {
-                data = accountWeeklyWeights[_account][lastUpdateWeek];
+                weight = accountWeeklyWeights[_account][lastUpdateWeek];
                 while (lastUpdateWeek < _systemWeek) {
-                    unchecked { lastUpdateWeek++; }
-                    // Fill in any missing weeks with same data
-                    accountWeeklyWeights[_account][lastUpdateWeek] = data;
+                    unchecked{lastUpdateWeek++;}
+                    // Fill in any missing weeks
+                    accountWeeklyWeights[_account][lastUpdateWeek] = weight;
                 }
             }
+            accountData[_account].lastUpdateWeek = uint16(_systemWeek);
             acctData.lastUpdateWeek = uint16(_systemWeek);
-            return (acctData, data);
+            return (acctData, weight);
         }
 
-        data = accountWeeklyWeights[_account][lastUpdateWeek];
+        weight = accountWeeklyWeights[_account][lastUpdateWeek];
         uint8 bitmap = acctData.updateWeeksBitmap;
         uint targetSyncWeek = min(_systemWeek, lastUpdateWeek + MAX_STAKE_GROWTH_WEEKS);
 
         // Populate data for missed weeks
         while (lastUpdateWeek < targetSyncWeek) {
-            unchecked { lastUpdateWeek++; }
-            data.weight += uint128(pending); // Increment weights by weekly growth factor.
-            data.weightedElection = data.weight * acctData.election;
-            accountWeeklyWeights[_account][lastUpdateWeek] = data;
+            unchecked{ lastUpdateWeek++; }
+            weight += pending; // Increment weights by weekly growth factor.
+            accountWeeklyWeights[_account][lastUpdateWeek] = weight;
 
             // Shift left on bitmap as we pass over each week.
             bitmap = bitmap << 1;
             if (bitmap & MAX_WEEK_BIT == MAX_WEEK_BIT){ // If left-most bit is true, we have something to realize; push pending to realized.
                 // Do any updates needed to realize an amount for an account.
-
-                WeightData memory realizedData = accountWeeklyToRealize[_account][lastUpdateWeek];
-                pending -= uint104(realizedData.weight);
-                realized += uint104(realizedData.weight);
+                uint toRealize = accountWeeklyToRealize[_account][lastUpdateWeek];
+                pending -= toRealize;
+                realized += toRealize;
                 if (pending == 0) break; // All pending has been realized. No need to continue.
             }
         }
 
-        // Populate data for missed weeks
+        // Fill in any missed weeks.
         while (lastUpdateWeek < _systemWeek){
-            unchecked { lastUpdateWeek++; }
-            accountWeeklyWeights[_account][lastUpdateWeek] = data;
+            unchecked{lastUpdateWeek++;}
+            accountWeeklyWeights[_account][lastUpdateWeek] = weight;
         }   
 
-        return (
-            AccountData({
-                updateWeeksBitmap: bitmap,
-                pendingStake: uint104(pending),
-                realizedStake: uint104(realized),
-                election: acctData.election,
-                lastUpdateWeek: uint16(_systemWeek)
-            }), data
-        );
+        // Write new account data to storage.
+        acctData = AccountData({
+            updateWeeksBitmap: bitmap,
+            pendingStake: uint112(pending),
+            realizedStake: uint112(realized),
+            lastUpdateWeek: uint16(_systemWeek)
+        });
     }
 
     /**
         @notice View function to get the current weight for an account
     */
-    function getAccountWeight(address account) external view returns (WeightData memory data) {
+    function getAccountWeight(address account) external view returns (uint) {
         return getAccountWeightAt(account, getWeek());
     }
 
     /**
         @notice Get the weight for an account in a given week
     */
-    function getAccountWeightAt(address _account, uint _week) public view returns (WeightData memory data) {
-        if (_week > getWeek()) return data;
+    function getAccountWeightAt(address _account, uint _week) public view returns (uint) {
+        if (_week > getWeek()) return 0;
         
         AccountData memory acctData = accountData[_account];
 
-        uint104 pending = acctData.pendingStake;
+        uint pending = uint(acctData.pendingStake);
         
         uint16 lastUpdateWeek = acctData.lastUpdateWeek;
 
         if (lastUpdateWeek >= _week) return accountWeeklyWeights[_account][_week]; 
 
-        WeightData memory data = accountWeeklyWeights[_account][lastUpdateWeek];
-
-        if (pending == 0) return data;
+        uint weight = accountWeeklyWeights[_account][lastUpdateWeek];
+        if (pending == 0) return weight;
 
         uint8 bitmap = acctData.updateWeeksBitmap;
 
-        uint128 weight = data.weight;
-
         while (lastUpdateWeek < _week) { // Populate data for missed weeks
-            unchecked { lastUpdateWeek++; }
-            data.weight += pending; // Increment weight by 1 week
+            unchecked{lastUpdateWeek++;}
+            weight += pending; // Increment weight by 1 week
 
             // Our bitmap is used to determine if week has any amount to realize.
             bitmap = bitmap << 1;
             if (bitmap & MAX_WEEK_BIT == MAX_WEEK_BIT){ // If left-most bit is true, we have something to realize; push pending to realized.
-                pending -= uint104(accountWeeklyToRealize[_account][lastUpdateWeek].weight);
+                pending -= accountWeeklyToRealize[_account][lastUpdateWeek];
                 if (pending == 0) break; // All pending has now been realized, let's exit.
             }            
         }
         
-        data.weightedElection = data.weight * acctData.election;
-        return data;
+        return weight;
     }
 
     /**
@@ -627,7 +434,7 @@ contract YearnBoostedStaker {
              this function over it's `view` counterpart is preferred for
              contract -> contract interactions.
     */
-    function checkpointGlobal() external returns (WeightData memory data) {
+    function checkpointGlobal() external returns (uint) {
         uint systemWeek = getWeek();
         return _checkpointGlobal(systemWeek);
     }
@@ -638,46 +445,39 @@ contract YearnBoostedStaker {
              this function over it's `view` counterpart is preferred for
              contract -> contract interactions.
     */
-    function _checkpointGlobal(uint systemWeek) internal returns (WeightData memory data) {
+    function _checkpointGlobal(uint systemWeek) internal returns (uint) {
         // These two share a storage slot.
         uint16 lastUpdateWeek = globalLastUpdateWeek;
+        uint rate = globalGrowthRate;
 
-        WeightData memory rate = globalGrowthRate;
+        uint weight = globalWeeklyWeights[lastUpdateWeek];
 
-        data = globalWeeklyWeights[lastUpdateWeek];
-
-        if (data.weight == 0) {
+        if (weight == 0) {
             globalLastUpdateWeek = uint16(systemWeek);
-            return data;
+            return 0;
         }
 
         if (lastUpdateWeek == systemWeek){
-            return data;
+            return weight;
         }
 
         while (lastUpdateWeek < systemWeek) {
-            unchecked { lastUpdateWeek++; }
-            // Increment
-            data.weight += rate.weight;
-            data.weightedElection += rate.weightedElection;
-            globalWeeklyWeights[lastUpdateWeek] = data;
-
-            // Decrement
-            WeightData memory realize = globalWeeklyToRealize[lastUpdateWeek];
-            rate.weight -= realize.weight;
-            rate.weightedElection -= realize.weightedElection;
+            unchecked{lastUpdateWeek++;}
+            weight += rate;
+            globalWeeklyWeights[lastUpdateWeek] = weight;
+            rate -= globalWeeklyToRealize[lastUpdateWeek];
         }
 
-        globalGrowthRate = rate;
+        globalGrowthRate = uint112(rate);
         globalLastUpdateWeek = uint16(systemWeek);
 
-        return data;
+        return weight;
     }
 
     /**
         @notice Get the system weight for current week.
     */
-    function getGlobalWeight() external view returns (WeightData memory data) {
+    function getGlobalWeight() external view returns (uint) {
         return getGlobalWeightAt(getWeek());
     }
 
@@ -686,36 +486,28 @@ contract YearnBoostedStaker {
         @dev querying a week in the future will always return 0.
         @param week the week number to query global weight for.
     */
-    function getGlobalWeightAt(uint week) public view returns (WeightData memory data) {
+    function getGlobalWeightAt(uint week) public view returns (uint) {
         uint systemWeek = getWeek();
-        if (week > systemWeek) return data;
+        if (week > systemWeek) return 0;
 
         // Read these together since they are packed in the same slot.
         uint16 lastUpdateWeek = globalLastUpdateWeek;
-
-        WeightData memory rate = globalGrowthRate;
+        uint rate = globalGrowthRate;
 
         if (week <= lastUpdateWeek) return globalWeeklyWeights[week];
 
-        data = globalWeeklyWeights[lastUpdateWeek];
-
-        if (rate.weight == 0) {
-            return data;
+        uint weight = globalWeeklyWeights[lastUpdateWeek];
+        if (rate == 0) {
+            return weight;
         }
 
         while (lastUpdateWeek < week) {
-            unchecked { lastUpdateWeek++; }
-            // Increment
-            data.weight += rate.weight;
-            data.weightedElection += rate.weightedElection;
-
-            // Decrement
-            WeightData memory realize = globalWeeklyToRealize[lastUpdateWeek];
-            rate.weight -= realize.weight;
-            rate.weightedElection -= realize.weightedElection;
+            unchecked {lastUpdateWeek++;}
+            weight += rate;
+            rate -= globalWeeklyToRealize[lastUpdateWeek];
         }
 
-        return data;
+        return weight;
     }
 
     /**
@@ -726,15 +518,6 @@ contract YearnBoostedStaker {
     function balanceOf(address _account) external view returns (uint) {
         AccountData memory acctData = accountData[_account];
         return 2 * (acctData.pendingStake + acctData.realizedStake);
-    }
-
-    /**
-        @notice Returns the account's active election.
-        @param _account Account to query.
-        @return election value in terms of BPS.
-    */
-    function getElection(address _account) external view returns (uint election) {
-        return accountData[_account].election;
     }
 
     /**

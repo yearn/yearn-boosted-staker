@@ -80,7 +80,7 @@ def yvmkusd():
 
 @pytest.fixture(scope="session")
 def dai_whale(accounts):
-    whale = accounts['0x075e72a5eDf65F0A5f44699c7654C1a76941Ddc8']
+    whale = accounts['0x40ec5B33f54e0E8A33A975908C5BA1c14e5BbbDf']
     whale.balance += 10 ** 18
     yield whale
 
@@ -127,9 +127,8 @@ def stable_token(yvmkusd):
 @pytest.fixture(scope="session")
 def rewards(project, user, staker, gov_token, stable_token, gov):
     rewards_contract = user.deploy(
-        project.TwoTokenRewardDistributor,
+        project.SingleTokenRewardDistributor,
         staker,
-        gov_token,
         stable_token,
         gov
     )
@@ -167,18 +166,14 @@ def setup_rewards(user, accounts, staker, gov, user2, yprisma, yvmkusd, rewards,
     staker.deposit(amt, sender=user)
     staker.deposit(amt, sender=user2)
 
-    staker.setElection(7_500, sender=user)
-    staker.setElection(2_500, sender=user2)
-
     # Enable deposits
     owner = accounts[staker.owner()]
     owner.balance += 10**18
     staker.setWeightedDepositor(rewards, True, sender=owner)
-    rewards.configureAccount(ZERO_ADDRESS, True, sender=user)
+    rewards.configureRecipient(ZERO_ADDRESS, sender=user)
 
     # Deposit to rewards
     amt = 10_000 * 10 ** 18
-    rewards.depositRewards(amt, amt, sender=fr_account)
+    rewards.depositReward(amt, sender=fr_account)
     week = rewards.getWeek()
-    assert amt == rewards.weeklyRewardInfo(week).amountToken1
-    assert amt == rewards.weeklyRewardInfo(week).amountToken2
+    assert amt == rewards.weeklyRewardAmount(week)

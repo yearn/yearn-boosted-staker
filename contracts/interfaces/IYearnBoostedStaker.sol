@@ -20,11 +20,6 @@ interface IYearnBoostedStaker {
         uint8 updateWeeksBitmap;
     }
 
-    struct WeightData {
-        uint128 weight;
-        uint128 weightedElection;
-    }
-
     enum ApprovalStatus {
         None,               // 0. Default value, indicating no approval
         DepositOnly,        // 1. Approved for deposit only
@@ -38,8 +33,8 @@ interface IYearnBoostedStaker {
     function stakeToken() external view returns (IERC20);
     function totalSupply() external view returns (uint);
     function accountData(address account) external view returns (AccountData memory data);
-    function globalGrowthRate() external view returns (WeightData memory data);
-    function globalWeeklyWeights(uint week) external view returns (WeightData memory data);
+    function globalGrowthRate() external view returns (uint rate);
+    function globalWeeklyWeights(uint week) external view returns (uint weight);
     function approvedCaller(address account, address caller) external view returns (ApprovalStatus);
     function approvedWeightedDepositor(address depositor) external view returns (bool);
     /**
@@ -55,43 +50,43 @@ interface IYearnBoostedStaker {
         @notice Get the current realized weight for an account
         @param _account Account to checkpoint.
         @return acctData Most recent account data written to storage.
-        @return data Most current account weight data.
+        @return weight Current account weight.
         @dev Prefer to use this function over it's view counterpart for
              contract -> contract interactions.
     */
-    function checkpointAccount(address _account) external returns (AccountData memory acctData, WeightData memory data);
-    function checkpointAccountWithLimit(address _account, uint _week) external returns (AccountData memory acctData, WeightData memory data);
+    function checkpointAccount(address _account) external returns (AccountData memory acctData, uint weight);
+    function checkpointAccountWithLimit(address _account, uint _week) external returns (AccountData memory acctData, uint weight);
     /**
         @notice View function to get the current weight for an account
     */
-    function getAccountWeight(address account) external view returns (WeightData memory data);
+    function getAccountWeight(address account) external view returns (uint);
     /**
         @notice Get the weight for an account in a given week
     */
-    function getAccountWeightAt(address _account, uint _week) external view returns (WeightData memory);
+    function getAccountWeightAt(address _account, uint _week) external view returns (uint weight);
     /**
         @notice Get the current total system weight
         @dev Also updates local storage values for total weights. Using
              this function over it's `view` counterpart is preferred for
              contract -> contract interactions.
     */
-    function checkpointGlobal() external returns (WeightData memory data);
+    function checkpointGlobal() external returns (uint weight);
     /**
         @notice Get the system weight for current week.
     */
-    function getGlobalWeight() external view returns (WeightData memory data);
+    function getGlobalWeight() external view returns (uint weight);
     /**
         @notice Get the system weight for a specified week in the past.
         @dev querying a week in the future will always return 0.
         @param week the week number to query global weight for.
     */
-    function getGlobalWeightAt(uint week) external view returns (WeightData memory data);
+    function getGlobalWeightAt(uint week) external view returns (uint weight);
     /**
         @notice Returns the balance of underlying staked tokens for an account
         @param _account Account to query balance.
         @return balance of account.
     */
-    function balanceOf(address _account) external view returns (uint);
+    function balanceOf(address _account) external view returns (uint balance);
 
     /**
         @notice Allow another address to deposit or withdraw on behalf of. Useful for zaps and other functionality.
