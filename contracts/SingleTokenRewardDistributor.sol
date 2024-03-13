@@ -164,12 +164,20 @@ contract SingleTokenRewardDistributor is WeekStart {
 
     /**
         @notice Helper function used to determine overal share of rewards at a particular week.
-        @dev    Computing shares in past weeks is accurate. However, current week computations will not accurate 
-                as week the is not yet finalized.
+        @dev    Computing account weight ratio in past weeks is accurate. However, current week 
+                estimates will not accurate until the week is finalized.
         @dev    Results scaled to PRECSION.
     */
-    function computeSharesAt(address _account, uint _week) public view returns (uint rewardShare) {
-        require(_week <= getWeek(), "Invalid week");
+    function computeWeightRatio(address _account) external view returns (uint rewardShare) {
+        return _computeWeightRatioAt(_account, getWeek());
+    }
+
+    function computeWeightRatioAt(address _account, uint _week) external view returns (uint rewardShare) {
+        if (_week > getWeek()) return 0;
+        return _computeWeightRatioAt(_account, _week);
+    }
+
+    function _computeWeightRatioAt(address _account, uint _week) internal view returns (uint rewardShare) {
         uint acctWeight = staker.getAccountWeightAt(_account, _week);
         if (acctWeight == 0) return 0; // User has no weight.
         uint globalWeight = staker.getGlobalWeightAt(_week);
@@ -247,7 +255,7 @@ contract SingleTokenRewardDistributor is WeekStart {
         uint currentWeek = getWeek();
         if(_week >= currentWeek) return 0;
         if(_week < accountInfo[_account].lastClaimWeek) return 0;
-        uint rewardShare = computeSharesAt(_account, _week);
+        uint rewardShare = _computeWeightRatioAt(_account, _week);
         uint totalWeeklyAmount = weeklyRewardAmount[_week];
         rewardAmount = totalWeeklyAmount == 0 ? 0 : rewardShare * totalWeeklyAmount / PRECISION;
     }

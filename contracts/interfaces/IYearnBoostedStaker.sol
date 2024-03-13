@@ -81,6 +81,7 @@ interface IYearnBoostedStaker {
         @param week the week number to query global weight for.
     */
     function getGlobalWeightAt(uint week) external view returns (uint weight);
+    function getAccountWeightRatioAt(address account, uint week) external view returns (uint ratio);
     /**
         @notice Returns the balance of underlying staked tokens for an account
         @param _account Account to query balance.

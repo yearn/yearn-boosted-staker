@@ -511,6 +511,34 @@ contract YearnBoostedStaker {
     }
 
     /**
+        @notice Returns the ratio of an account's weight to global weight at current week.
+        @param _account Account to query.
+        @return ratio of account weight to gloabl weight in terms of 1e18.
+    */
+    function getAccountWeightRatio(address _account) public view returns (uint) {
+        return _getAccountWeightRatioAt(_account, getWeek());
+    }
+
+    /**
+        @notice Returns the ratio of an account's weight to global weight at specified week.
+        @param _account Account to query.
+        @param _week Week to query.
+        @return ratio of account weight to gloabl weight in terms of 1e18.
+    */
+    function getAccountWeightRatioAt(address _account, uint _week) public view returns (uint) {
+        if (_week > getWeek()) return 0;
+        return _getAccountWeightRatioAt(_account, getWeek());
+    }
+
+    function _getAccountWeightRatioAt(address _account, uint _week) internal view returns (uint) {
+        uint acctWeight = getAccountWeightAt(_account, _week);
+        if (acctWeight == 0) return 0; // User has no weight.
+        uint globalWeight = getGlobalWeightAt(_week);
+        if (globalWeight == 0) return 0;
+        return acctWeight * 1e18 / globalWeight;
+    }
+
+    /**
         @notice Returns the balance of underlying staked tokens for an account
         @param _account Account to query balance.
         @return balance of account.
