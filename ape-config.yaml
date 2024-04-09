@@ -29,6 +29,8 @@ ethereum:
     default_provider: foundry
   
 foundry:
+  base_fee: 0
+  priority_fee: 0
   fork:
     ethereum:
       mainnet:

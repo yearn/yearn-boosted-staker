@@ -208,12 +208,17 @@ contract SingleTokenRewardDistributor is WeekStart {
         }
     }
 
+    function claimable(address _account) external view returns (uint claimable) {
+        (uint claimStartWeek, uint claimEndWeek) = getSuggestedClaimRange(_account);
+        return _getTotalClaimableByRange(claimStartWeek, claimEndWeek);
+    }
+
     /**
         @notice Helper function returns suggested start and end range for claim weeks.
         @dev    This function is designed to be called prior to ranged claims to shorted the number of iterations
                 required to loop if possible.
     */
-    function getSuggestedClaimRange(address _account) external view returns (uint claimStartWeek, uint claimEndWeek) {
+    function getSuggestedClaimRange(address _account) public view returns (uint claimStartWeek, uint claimEndWeek) {
         uint currentWeek = getWeek();
         if (currentWeek == 0) return (0, 0);
         bool canClaim;

@@ -308,6 +308,7 @@ def test_claims_when_start_week_is_set_gt_zero(
     print(f'⛽️ {tx.gas_used}')
     a, b = rewards.getSuggestedClaimRange(user2)
     tx = rewards.claimWithRange(a, b, sender=user2)
+    assert False
     print(f'⛽️ {tx.gas_used}')
     stable_bal = stable_token.balanceOf(rewards)/1e18
     assert stable_bal < 4000
