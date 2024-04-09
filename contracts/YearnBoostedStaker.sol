@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0
-pragma solidity ^0.8.19;
+pragma solidity ^0.8.22;
 
 import {IERC20, SafeERC20} from "@openzeppelin/contracts@v4.9.3/token/ERC20/utils/SafeERC20.sol";
 
@@ -28,7 +28,7 @@ contract YearnBoostedStaker {
     // Permissioned roles
     address public owner;
     address public pendingOwner;
-    mapping(address account => mapping(address caller => bool approved)) public approvedCaller;
+    mapping(address account => mapping(address caller => ApprovalStatus approvalStatus)) public approvedCaller;
     mapping(address depositor => bool approved) public approvedWeightedDepositor;
 
     struct AccountData {
@@ -47,9 +47,16 @@ contract YearnBoostedStaker {
         uint8 updateWeeksBitmap;
     }
 
+    enum ApprovalStatus {
+        None,               // 0. Default value, indicating no approval
+        DepositOnly,        // 1. Approved for deposit only
+        WithdrawOnly,       // 2. Approved for withdrawal only
+        DepositAndWithdraw  // 3. Approved for both deposit and withdrawal
+    }
+
     event Deposit(address indexed account, uint indexed week, uint amount, uint newUserWeight, uint weightAdded);
     event Withdraw(address indexed account, uint indexed week, uint amount, uint newUserWeight, uint weightRemoved);
-    event ApprovedCallerSet(address indexed account, address indexed caller, bool approved);
+    event ApprovedCallerSet(address indexed account, address indexed caller, ApprovalStatus status);
     event WeightedDepositorSet(address indexed depositor, bool approved);
     event OwnershipTransferred(address indexed newOwner);
 
@@ -86,33 +93,37 @@ contract YearnBoostedStaker {
     }
 
     function depositFor(address _account, uint _amount) external returns (uint) {
-        require(
-            msg.sender == _account ||
-            approvedCaller[_account][msg.sender],
-            "!approvedCaller"
-        );
+        if (msg.sender != _account) {
+            ApprovalStatus status = approvedCaller[_account][msg.sender];
+            require(
+                status == ApprovalStatus.DepositAndWithdraw ||
+                status == ApprovalStatus.DepositOnly,
+                "!Permission"
+            );
+        }
+        
         return _deposit(_account, _amount);
     }
 
     function _deposit(address _account, uint _amount) internal returns (uint) {
-
+        require(_amount > 1 && _amount < type(uint112).max, "invalid amount");
+        
         stakeToken.transferFrom(msg.sender, address(this), uint(_amount));
 
         // Before going further, let's sync our account and global weights
         uint systemWeek = getWeek();
-        uint112 accountWeight = uint112(_checkpointAccount(_account, systemWeek));
+        (AccountData memory acctData, uint accountWeight) = _checkpointAccount(_account, systemWeek);
         uint112 globalWeight = uint112(_checkpointGlobal(systemWeek));
 
-        AccountData memory acctData = accountData[_account];
-
-        uint weight = _amount / 2;
-        _amount = weight * 2; // This helps prevent balance/weight discrepencies.
+        uint weight = _amount >> 1;
+        _amount = weight << 1; // This helps prevent balance/weight discrepencies.
         
         acctData.pendingStake += uint112(weight);
         globalGrowthRate += uint112(weight);
 
         uint realizeWeek = systemWeek + MAX_STAKE_GROWTH_WEEKS;
-        uint previous = accountWeeklyRealized[_account][realizeWeek];
+        uint previous;
+        if (acctData.pendingStake != 0) previous = accountWeeklyRealized[_account][realizeWeek]; // Only SLOAD if needed.
 
         // modify weekly realizations and bitmap
         accountWeeklyRealized[_account][realizeWeek] = previous + weight;
@@ -144,18 +155,17 @@ contract YearnBoostedStaker {
             "!approvedDepositor"
         );
         require(_idx <= MAX_STAKE_GROWTH_WEEKS, "Invalid week index.");
+        require(_amount > 1 && _amount < type(uint112).max, "invalid amount");
         
         stakeToken.transferFrom(msg.sender, address(this), uint(_amount));
 
         // Before going further, let's sync our account and global weights
         uint systemWeek = getWeek();
-        uint112 accountWeight = uint112(_checkpointAccount(_account, systemWeek));
+        (AccountData memory acctData, uint accountWeight) = _checkpointAccount(_account, systemWeek);
         uint112 globalWeight = uint112(_checkpointGlobal(systemWeek));
 
-        AccountData memory acctData = accountData[_account];
-
-        uint weight = _amount / 2;
-        _amount = weight * 2;
+        uint weight = _amount >> 1;
+        _amount = weight << 1;
         uint instantWeight = weight * (_idx + 1);
 
         accountWeeklyWeights[_account][systemWeek] = accountWeight + instantWeight;
@@ -166,7 +176,7 @@ contract YearnBoostedStaker {
         }
         else {
             acctData.pendingStake += uint112(weight);
-            globalGrowthRate += uint112(_amount / 2);
+            globalGrowthRate += uint112(_amount >> 1);
             uint realizeWeek = systemWeek + (MAX_STAKE_GROWTH_WEEKS - _idx);
             uint previous = accountWeeklyRealized[_account][realizeWeek];
             accountWeeklyRealized[_account][realizeWeek] = previous + weight;
@@ -175,7 +185,7 @@ contract YearnBoostedStaker {
             uint8 mask = uint8(1 << _idx);
             uint8 bitmap = acctData.updateWeeksBitmap;
             // Only update storage bitmap if bit at target position needs to be flipped.
-            if (bitmap & mask != mask) {
+            if (bitmap & mask != mask && weight > 0) {
                 acctData.updateWeeksBitmap = bitmap ^ mask; // Flip single bit.
             }
         }
@@ -186,7 +196,6 @@ contract YearnBoostedStaker {
         emit Deposit(_account, systemWeek, _amount, accountWeight + instantWeight, instantWeight);
 
         return _amount;
-
     }
 
     /**
@@ -198,15 +207,19 @@ contract YearnBoostedStaker {
     }
 
     function withdrawFor(address _account, uint _amount, address _receiver) external returns (uint) {
-        require(
-            msg.sender == _account ||
-            approvedCaller[_account][msg.sender],
-            "!approvedCaller"
-        );
+        if (msg.sender != _account) {
+            ApprovalStatus status = approvedCaller[_account][msg.sender];
+            require(
+                status == ApprovalStatus.DepositAndWithdraw ||
+                status == ApprovalStatus.WithdrawOnly,
+                "!Permission"
+            );
+        }
         return _withdraw(_account, _amount, _receiver);
     }
 
     function _withdraw(address _account, uint _amount, address _receiver) internal returns (uint) {
+        require(_amount > 1 && _amount < type(uint112).max, "invalid amount");
         uint systemWeek = getWeek();
 
         // Before going further, let's sync our account and global weights
@@ -218,39 +231,41 @@ contract YearnBoostedStaker {
         // Here we do work to withdraw from most recent (least weighted) deposits first
         uint8 bitmap = acctData.updateWeeksBitmap;
         uint weightToRemove;
-        uint amountNeeded = _amount / 2;
-        _amount = amountNeeded * 2;
+
+        uint amountNeeded = _amount >> 1;
+        _amount = amountNeeded << 1; // This helps prevent balance/weight discrepencies.
 
         if (bitmap > 0) {
-            for (uint weekIndex; weekIndex < MAX_STAKE_GROWTH_WEEKS; weekIndex++) {
+            for (uint weekIndex; weekIndex < MAX_STAKE_GROWTH_WEEKS;) {
                 // Move right to left, checking each bit if there's an update for corresponding week.
                 uint8 mask = uint8(1 << weekIndex);
                 if (bitmap & mask == mask) {
-                    uint weekToCheck = systemWeek - weekIndex;
-                    uint pending = accountWeeklyRealized[_account][weekToCheck + MAX_STAKE_GROWTH_WEEKS];
+                    uint weekToCheck = systemWeek + MAX_STAKE_GROWTH_WEEKS - weekIndex;
+                    uint pending = accountWeeklyRealized[_account][weekToCheck];
                     
                     if (amountNeeded > pending){
                         weightToRemove += pending * (weekIndex + 1);
-                        accountWeeklyRealized[_account][weekToCheck + MAX_STAKE_GROWTH_WEEKS] = 0;
-                        globalWeeklyToRealize[weekToCheck + MAX_STAKE_GROWTH_WEEKS] -= pending;
+                        accountWeeklyRealized[_account][weekToCheck] = 0;
+                        globalWeeklyToRealize[weekToCheck] -= pending;
                         bitmap = bitmap ^ mask;
                         amountNeeded -= pending;
                     }
                     else { 
                         // handle the case where we have more pending than needed
                         weightToRemove += amountNeeded * (weekIndex + 1);
-                        accountWeeklyRealized[_account][weekToCheck + MAX_STAKE_GROWTH_WEEKS] -= amountNeeded;
-                        globalWeeklyToRealize[weekToCheck + MAX_STAKE_GROWTH_WEEKS] -= amountNeeded;
+                        accountWeeklyRealized[_account][weekToCheck] -= amountNeeded;
+                        globalWeeklyToRealize[weekToCheck] -= amountNeeded;
                         if (amountNeeded == pending) bitmap = bitmap ^ mask;
                         amountNeeded = 0;
                         break;
                     }
                 }
+                unchecked{weekIndex++;}
             }
             acctData.updateWeeksBitmap = bitmap;
         }
         
-        uint pendingRemoved = _amount / 2 - amountNeeded;
+        uint pendingRemoved = (_amount >> 1) - amountNeeded;
         if (amountNeeded > 0) {
             weightToRemove += amountNeeded * (1 + MAX_STAKE_GROWTH_WEEKS);
             acctData.realizedStake -= uint112(amountNeeded);
@@ -262,7 +277,6 @@ contract YearnBoostedStaker {
         
         accountData[_account] = acctData;
 
-        systemWeek = getWeek();
         globalGrowthRate -= uint112(pendingRemoved);
         globalWeeklyWeights[systemWeek] -= weightToRemove;
         uint newAccountWeight = accountWeeklyWeights[_account][systemWeek] - weightToRemove;
@@ -280,11 +294,12 @@ contract YearnBoostedStaker {
     /**
         @notice Get the current realized weight for an account
         @param _account Account to checkpoint.
+        @return acctData Most recent account data written to storage.
         @return weight Most current account weight.
         @dev Prefer to use this function over it's view counterpart for
              contract -> contract interactions.
     */
-    function checkpointAccount(address _account) external returns (uint weight) {
+    function checkpointAccount(address _account) external returns (AccountData memory acctData, uint weight) {
         return _checkpointAccount(_account, getWeek());
     }
 
@@ -294,9 +309,10 @@ contract YearnBoostedStaker {
                 heckpoint and single call becomes too expensive.
         @param _account Account to checkpoint.
         @param _week Week which we
+        @return acctData Most recent account data written to storage.
         @return weight Account weight for provided week.
     */
-    function checkpointAccountWithLimit(address _account, uint _week) external returns (uint weight) {
+    function checkpointAccountWithLimit(address _account, uint _week) external returns (AccountData memory acctData, uint weight) {
         uint systemWeek = getWeek();
         
         if (_week >= systemWeek) _week = systemWeek;
@@ -304,28 +320,31 @@ contract YearnBoostedStaker {
         return _checkpointAccount(_account, _week);
     }
 
-    function _checkpointAccount(address _account, uint _systemWeek) internal returns (uint weight){
+    function _checkpointAccount(address _account, uint _systemWeek) internal returns (AccountData memory acctData, uint weight){
         
-        AccountData memory acctData = accountData[_account];
+        acctData = accountData[_account];
 
         uint lastUpdateWeek = acctData.lastUpdateWeek;
 
-        weight = accountWeeklyWeights[_account][lastUpdateWeek];
+        require(_systemWeek >= lastUpdateWeek, "specified week is older than last update.");
 
         uint pending = uint(acctData.pendingStake); // deposited weight still growing.
-        
+        uint realized = acctData.realizedStake;
+
         if (pending == 0) {
-            if (weight != 0) {
+            if (realized != 0) {
+                weight = accountWeeklyWeights[_account][lastUpdateWeek];
                 while (lastUpdateWeek < _systemWeek) {
                     unchecked{lastUpdateWeek++;}
                     accountWeeklyWeights[_account][lastUpdateWeek] = weight; // Fill in any missing weeks
                 }
             }
             accountData[_account].lastUpdateWeek = uint16(_systemWeek);
-            return weight; // let's return early if user have no pending stake to update.
+            acctData.lastUpdateWeek = uint16(_systemWeek);
+            return (acctData, weight);
         }
 
-        uint realized = acctData.realizedStake;
+        weight = accountWeeklyWeights[_account][lastUpdateWeek];
         uint8 bitmap = acctData.updateWeeksBitmap;
         uint targetSyncWeek = min(_systemWeek, lastUpdateWeek + MAX_STAKE_GROWTH_WEEKS);
 
@@ -347,20 +366,20 @@ contract YearnBoostedStaker {
         }
 
         // Fill in any missed weeks.
-        while (targetSyncWeek < _systemWeek){
-            unchecked{targetSyncWeek++;}
-            accountWeeklyWeights[_account][targetSyncWeek] = weight;
+        while (lastUpdateWeek < _systemWeek){
+            unchecked{lastUpdateWeek++;}
+            accountWeeklyWeights[_account][lastUpdateWeek] = weight;
         }   
 
         // Write new account data to storage.
-        accountData[_account] = AccountData({
+        acctData = AccountData({
             updateWeeksBitmap: bitmap,
             pendingStake: uint112(pending),
             realizedStake: uint112(realized),
             lastUpdateWeek: uint16(_systemWeek)
         });
 
-        return weight;
+        accountData[_account] = acctData;
     }
 
     /**
@@ -396,7 +415,6 @@ contract YearnBoostedStaker {
             // Our bitmap is used to determine if week has any amount to realize.
             bitmap = bitmap << 1;
             if (bitmap & MAX_WEEK_BIT == MAX_WEEK_BIT){ // If left-most bit is true, we have something to realize; push pending to realized.
-                // Do any updates needed to realize an amount for an account.
                 pending -= accountWeeklyRealized[_account][lastUpdateWeek];
                 if (pending == 0) break; // All pending has now been realized, let's exit.
             }            
@@ -474,7 +492,7 @@ contract YearnBoostedStaker {
         if (week <= lastUpdateWeek) return globalWeeklyWeights[week];
 
         uint weight = globalWeeklyWeights[lastUpdateWeek];
-        if (rate == 0 || lastUpdateWeek >= systemWeek) {
+        if (rate == 0) {
             return weight;
         }
 
@@ -500,11 +518,11 @@ contract YearnBoostedStaker {
     /**
         @notice Allow another address to deposit or withdraw on behalf of. Useful for zaps and other functionality.
         @param _caller Address of the caller to approve or unapprove.
-        @param _approved Approve or unapprove the caller.
+        @param _status Enum representing various approval status states.
     */
-    function setApprovedCaller(address _caller, bool _approved) external {
-        approvedCaller[msg.sender][_caller] = _approved;
-        emit ApprovedCallerSet(msg.sender, _caller, _approved);
+    function setApprovedCaller(address _caller, ApprovalStatus _status) external {
+        approvedCaller[msg.sender][_caller] = _status;
+        emit ApprovedCallerSet(msg.sender, _caller, _status);
     }
 
     /**
@@ -527,7 +545,7 @@ contract YearnBoostedStaker {
         pendingOwner = _pendingOwner;
     }
 
-     /**
+    /**
         @notice Allow pending owner to accept ownership
     */
     function acceptOwnership() external {
@@ -547,7 +565,9 @@ contract YearnBoostedStaker {
     }
 
     function getWeek() public view returns (uint week) {
-        return (block.timestamp - START_TIME) / 1 weeks;
+        unchecked{
+            return (block.timestamp - START_TIME) / 1 weeks;
+        }
     }
 
     function min(uint a, uint b) internal pure returns (uint) {
