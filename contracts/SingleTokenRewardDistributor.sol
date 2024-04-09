@@ -14,40 +14,33 @@ contract SingleTokenRewardDistributor is WeekStart {
     IYearnBoostedStaker public immutable staker;
     IERC20 public immutable rewardToken;
     uint public immutable START_WEEK;
-    address public owner;
-    uint public weightedDepositIndex;
 
     struct AccountInfo {
         address recipient; // Who rewards will be sent to. Cheaper to store here than in dedicated mapping.
-        uint64 lastClaimWeek;
+        uint96 lastClaimWeek;
     }
 
     mapping(uint week => uint amount) public weeklyRewardAmount;
-    mapping(address account => uint week) public accountClaimWeek;
     mapping(address account => AccountInfo info) public accountInfo;
     mapping(address account => mapping(address claimer => bool approved)) public approvedClaimer;
     
     event RewardDeposited(uint indexed week, address indexed depositor, uint rewardAmount);
     event RewardsClaimed(address indexed account, uint indexed week, uint rewardAmount);
-    event AccountConfigured(address indexed account, address indexed recipient);
-    event WeightedDepositIndexSet(uint indexed idx);
-    event OwnerSet(address indexed owner);
+    event RecipientConfigured(address indexed account, address indexed recipient);
+    event ClaimerApproved(address indexed account, address indexed, bool approved);
 
     /**
         @notice Allow permissionless deposits to the current week.
         @param _staker the staking contract to use for weight calculations.
-        @param _rewardToekn address of reward token.
-        @param _owner account with ability to enabled weighted staker deposits.
+        @param _rewardToken address of reward token.
     */
     constructor(
         IYearnBoostedStaker _staker,
-        IERC20 _rewardToekn,
-        address _owner
+        IERC20 _rewardToken
     )
         WeekStart(_staker) {
         staker = _staker;
-        rewardToken = _rewardToekn;
-        owner = _owner;
+        rewardToken = _rewardToken;
         START_WEEK = staker.getWeek();
     }
 
@@ -79,8 +72,7 @@ contract SingleTokenRewardDistributor is WeekStart {
     }
 
     /**
-        @notice Claim all owed rewards since the last week touched by the user. All claims will retrieve 
-                both tokens if available.
+        @notice Claim all owed rewards since the last week touched by the user.
         @dev    It is not suggested to use this function directly. Rather `claimWithRange` 
                 will tend to be more gas efficient when used with values from `getSuggestedClaimRange`.
     */
@@ -91,8 +83,7 @@ contract SingleTokenRewardDistributor is WeekStart {
     }
 
     /**
-        @notice Claim on behalf of another account. Retrieves all owed rewards since the last week touched by the user. 
-                All claims will retrieve both tokens if available.
+        @notice Claim on behalf of another account. Retrieves all owed rewards since the last week touched by the user.
         @dev    It is not suggested to use this function directly. Rather `claimWithRange` 
                 will tend to be more gas efficient when used with values from `getSuggestedClaimRange`.
     */
@@ -122,8 +113,8 @@ contract SingleTokenRewardDistributor is WeekStart {
         @param _account Account of which to make the claim on behalf of.
         @param _claimStartWeek The min week to search and rewards.
         @param _claimEndWeek The max week in which to search for an claim rewards.
-        @dev    IMPORTANT: Choosing a `_claimStartWeek` that is greater than the earliest week in which a user
-                may claim. Will result in the user being locked out (total loss) of rewards for any weeks prior.
+        @dev    WARNING: Choosing a `_claimStartWeek` that is greater than the earliest week in which a user
+                may claim will result in the user being locked out (total loss) of rewards for any weeks prior.
         @dev    Useful to target specific weeks with known reward amounts. Claiming via this function will tend 
                 to be more gas efficient when used with values from `getSuggestedClaimRange`.
     */
@@ -143,17 +134,18 @@ contract SingleTokenRewardDistributor is WeekStart {
     ) internal returns (uint amountClaimed) {
 
         AccountInfo storage info = accountInfo[_account];
-
-        // Sanitize inputs
-        _claimStartWeek = info.lastClaimWeek == 0 ? START_WEEK : info.lastClaimWeek;
         uint currentWeek = getWeek();
+        
+        // Sanitize inputs
+        uint _minStartWeek = info.lastClaimWeek == 0 ? START_WEEK : info.lastClaimWeek;
+        _claimStartWeek = max(_minStartWeek, _claimStartWeek);
+        
         require(_claimStartWeek <= _claimEndWeek, "claimStartWeek > claimEndWeek");
         require(_claimEndWeek < currentWeek, "claimEndWeek >= currentWeek");
-        require(_claimStartWeek >= info.lastClaimWeek, "claimStartWeek too low");
         amountClaimed = _getTotalClaimableByRange(_account, _claimStartWeek, _claimEndWeek);
         
         _claimEndWeek += 1;
-        info.lastClaimWeek = uint64(_claimEndWeek);
+        info.lastClaimWeek = uint96(_claimEndWeek);
         address recipient = info.recipient == address(0) ? _account : info.recipient;
         
         if (amountClaimed > 0) {
@@ -164,20 +156,12 @@ contract SingleTokenRewardDistributor is WeekStart {
 
     /**
         @notice Helper function used to determine overal share of rewards at a particular week.
-        @dev    Computing account weight ratio in past weeks is accurate. However, current week 
-                estimates will not accurate until the week is finalized.
+        @dev    Computing shares in past weeks is accurate. However, current week computations will not accurate 
+                as week the is not yet finalized.
         @dev    Results scaled to PRECSION.
     */
-    function computeWeightRatio(address _account) external view returns (uint rewardShare) {
-        return _computeWeightRatioAt(_account, getWeek());
-    }
-
-    function computeWeightRatioAt(address _account, uint _week) external view returns (uint rewardShare) {
-        if (_week > getWeek()) return 0;
-        return _computeWeightRatioAt(_account, _week);
-    }
-
-    function _computeWeightRatioAt(address _account, uint _week) internal view returns (uint rewardShare) {
+    function computeSharesAt(address _account, uint _week) public view returns (uint rewardShare) {
+        require(_week <= getWeek(), "Invalid week");
         uint acctWeight = staker.getAccountWeightAt(_account, _week);
         if (acctWeight == 0) return 0; // User has no weight.
         uint globalWeight = staker.getGlobalWeightAt(_week);
@@ -185,7 +169,7 @@ contract SingleTokenRewardDistributor is WeekStart {
     }
 
     /**
-        @dev Returns sum of both token types earned with the specified range of weeks.
+        @dev Returns sum of tokens earned with the specified range of weeks.
     */
     function getTotalClaimableByRange(
         address _account,
@@ -193,7 +177,7 @@ contract SingleTokenRewardDistributor is WeekStart {
         uint _claimEndWeek
     ) external view returns (uint claimable) {
         uint currentWeek = getWeek();
-        if (_claimEndWeek >= currentWeek) _claimEndWeek = currentWeek;
+        if (_claimEndWeek > currentWeek) _claimEndWeek = currentWeek;
         return _getTotalClaimableByRange(_account, _claimStartWeek, _claimEndWeek);
     }
 
@@ -202,7 +186,7 @@ contract SingleTokenRewardDistributor is WeekStart {
         uint _claimStartWeek,
         uint _claimEndWeek
     ) internal view returns (uint claimableAmount) {
-        for (uint i = _claimStartWeek; i <= _claimEndWeek; i++) {
+        for (uint i = _claimStartWeek; i <= _claimEndWeek; ++i) {
             uint claimable = getClaimableAt(_account, i);
             claimableAmount += claimable;
         }
@@ -242,11 +226,9 @@ contract SingleTokenRewardDistributor is WeekStart {
     }
 
     /**
-        @notice Returns suggested start and end range for claim weeks.
-        @dev    This function is designed to be called prior to ranged claims to shorted the number of iterations
-                required to loop if possible.
-        @param _account The account to claim for.
-        @param _week The past week to claim for.
+        @notice Get the reward amount available at a given week index.
+        @param _account The account to check.
+        @param _week The past week to check.
     */
     function getClaimableAt(
         address _account, 
@@ -255,9 +237,9 @@ contract SingleTokenRewardDistributor is WeekStart {
         uint currentWeek = getWeek();
         if(_week >= currentWeek) return 0;
         if(_week < accountInfo[_account].lastClaimWeek) return 0;
-        uint rewardShare = _computeWeightRatioAt(_account, _week);
+        uint rewardShare = computeSharesAt(_account, _week);
         uint totalWeeklyAmount = weeklyRewardAmount[_week];
-        rewardAmount = totalWeeklyAmount == 0 ? 0 : rewardShare * totalWeeklyAmount / PRECISION;
+        rewardAmount = rewardShare * totalWeeklyAmount / PRECISION;
     }
 
     function _onlyClaimers(address _account) internal returns (bool approved) {
@@ -266,34 +248,25 @@ contract SingleTokenRewardDistributor is WeekStart {
 
     /**
         @notice User may configure their account to set a custom reward recipient.
-        @param _recipient   Wallet to receive tokens on behalf of the account. Zero address will result in all tokens
-                            being transferred directly to the account holder.
+        @param _recipient   Wallet to receive rewards on behalf of the account. Zero address will result in all 
+                            rewards being transferred directly to the account holder.
     */
     function configureRecipient(address _recipient) external {
         accountInfo[msg.sender].recipient = _recipient;
-        emit AccountConfigured(msg.sender, _recipient);
+        emit RecipientConfigured(msg.sender, _recipient);
     }
 
     /**
-        @notice Used by owner to control instant boost level of weighted deposits.
-        @dev    Supplying an idx of 0 is least weighted. Max available index is equal to MAX_STAKE_GROWTH_WEEKS
-                value in the staker, and amounts to instant full boost.
-        @param _idx The index that all weighted deposits should use.
+        @notice Allow account to specify addresses to claim on their behalf.
+        @param _claimer Claimer to approve or revoke
+        @param _approved True to approve, False to revoke.
     */
-    function setWeightedDepositIndex(uint _idx) external {
-        require(msg.sender == owner);
-        require(_idx <= staker.MAX_STAKE_GROWTH_WEEKS(), "too high");
-        weightedDepositIndex = _idx;
-        emit WeightedDepositIndexSet(_idx);
+    function approveClaimer(address _claimer, bool _approved) external {
+        approvedClaimer[msg.sender][_claimer] = _approved;
+        emit ClaimerApproved(msg.sender, _claimer, _approved);
     }
 
-    /**
-        @notice Set new owner address.
-        @param _owner New owner address
-    */
-    function setOwner(address _owner) external {
-        require(msg.sender == owner);
-        owner = _owner;
-        emit OwnerSet(_owner);
+    function max(uint a, uint b) internal pure returns (uint) {
+        return a < b ? b : a;
     }
 }
