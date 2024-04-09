@@ -1,0 +1,19 @@
+# Ape stuff
+.build/
+.cache/
+contracts/.cache
+
+# Python
+.env
+.venv
+.pytest_cache
+.pytest_cache
+.vscode
+.python-version
+__pycache__
+venv
+.hypothesis
+TODO.md
+StakingZap.sol
+Staker.sol.hide
+test_staker.py.hide
