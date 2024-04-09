@@ -72,7 +72,11 @@ contract YearnBoostedStaker {
         owner = _owner;
         emit OwnershipTransferred(_owner);
         stakeToken = _token;
-        require(_max_stake_growth_weeks <= 7, "Too many weeks");
+        require(
+            _max_stake_growth_weeks > 0 &&
+            _max_stake_growth_weeks <= 7,
+            "Invalid weeks"
+        );
         MAX_STAKE_GROWTH_WEEKS = _max_stake_growth_weeks;
         MAX_WEEK_BIT = uint8(1 << MAX_STAKE_GROWTH_WEEKS);
         if (_start_time == 0){
@@ -107,8 +111,6 @@ contract YearnBoostedStaker {
 
     function _deposit(address _account, uint _amount) internal returns (uint) {
         require(_amount > 1 && _amount < type(uint112).max, "invalid amount");
-        
-        stakeToken.transferFrom(msg.sender, address(this), uint(_amount));
 
         // Before going further, let's sync our account and global weights
         uint systemWeek = getWeek();
@@ -122,29 +124,26 @@ contract YearnBoostedStaker {
         globalGrowthRate += uint112(weight);
 
         uint realizeWeek = systemWeek + MAX_STAKE_GROWTH_WEEKS;
-        uint previous;
-        if (acctData.pendingStake != 0) previous = accountWeeklyRealized[_account][realizeWeek]; // Only SLOAD if needed.
+        uint previous = accountWeeklyRealized[_account][realizeWeek];
 
         // modify weekly realizations and bitmap
         accountWeeklyRealized[_account][realizeWeek] = previous + weight;
         accountWeeklyWeights[_account][systemWeek] = accountWeight + weight;
         globalWeeklyToRealize[realizeWeek] += weight;
         globalWeeklyWeights[systemWeek] = globalWeight + weight;
-        if (previous == 0 && weight > 0) {
-            // We flip the far right bit to indicate an update occurred in current week.
-            acctData.updateWeeksBitmap += 1;
-        }
-
+        acctData.updateWeeksBitmap |= 1; // Use bitwise or to ensure bit is flipped at least weighted position.
         accountData[_account] = acctData;
         totalSupply += _amount;
         
+        stakeToken.transferFrom(msg.sender, address(this), uint(_amount));
         emit Deposit(_account, systemWeek, _amount, accountWeight + weight, weight);
-
+        
         return _amount;
     }
 
     /**
         @notice Allows an option for an approved helper to deposit to any account at any weight week.
+        @dev A deposit using this method only effects weight in current and future weeks. It does not backfill prior weeks.
         @param _amount Amount to deposit
         @param _idx Index of the week to deposit to relative to current week. E.g. 0 = current week, 4 = current plus 4 growth weeks.
         @return amount number of tokens deposited
@@ -156,8 +155,6 @@ contract YearnBoostedStaker {
         );
         require(_idx <= MAX_STAKE_GROWTH_WEEKS, "Invalid week index.");
         require(_amount > 1 && _amount < type(uint112).max, "invalid amount");
-        
-        stakeToken.transferFrom(msg.sender, address(this), uint(_amount));
 
         // Before going further, let's sync our account and global weights
         uint systemWeek = getWeek();
@@ -176,7 +173,7 @@ contract YearnBoostedStaker {
         }
         else {
             acctData.pendingStake += uint112(weight);
-            globalGrowthRate += uint112(_amount >> 1);
+            globalGrowthRate += uint112(weight);
             uint realizeWeek = systemWeek + (MAX_STAKE_GROWTH_WEEKS - _idx);
             uint previous = accountWeeklyRealized[_account][realizeWeek];
             accountWeeklyRealized[_account][realizeWeek] = previous + weight;
@@ -184,15 +181,14 @@ contract YearnBoostedStaker {
 
             uint8 mask = uint8(1 << _idx);
             uint8 bitmap = acctData.updateWeeksBitmap;
-            // Only update storage bitmap if bit at target position needs to be flipped.
-            if (bitmap & mask != mask && weight > 0) {
-                acctData.updateWeeksBitmap = bitmap ^ mask; // Flip single bit.
-            }
+            // Use bitwise or to ensure bit is flpped at target position.
+            acctData.updateWeeksBitmap |= mask;
         }
         
         accountData[_account] = acctData;
         totalSupply += _amount;
 
+        stakeToken.transferFrom(msg.sender, address(this), uint(_amount));
         emit Deposit(_account, systemWeek, _amount, accountWeight + instantWeight, instantWeight);
 
         return _amount;
@@ -223,10 +219,8 @@ contract YearnBoostedStaker {
         uint systemWeek = getWeek();
 
         // Before going further, let's sync our account and global weights
-        _checkpointAccount(_account, systemWeek);
+        (AccountData memory acctData, ) = _checkpointAccount(_account, systemWeek);
         _checkpointGlobal(systemWeek);
-
-        AccountData memory acctData = accountData[_account];
 
         // Here we do work to withdraw from most recent (least weighted) deposits first
         uint8 bitmap = acctData.updateWeeksBitmap;
@@ -300,7 +294,8 @@ contract YearnBoostedStaker {
              contract -> contract interactions.
     */
     function checkpointAccount(address _account) external returns (AccountData memory acctData, uint weight) {
-        return _checkpointAccount(_account, getWeek());
+        (acctData, weight) = _checkpointAccount(_account, getWeek());
+        accountData[_account] = acctData;
     }
 
     /**
@@ -314,10 +309,9 @@ contract YearnBoostedStaker {
     */
     function checkpointAccountWithLimit(address _account, uint _week) external returns (AccountData memory acctData, uint weight) {
         uint systemWeek = getWeek();
-        
         if (_week >= systemWeek) _week = systemWeek;
-
-        return _checkpointAccount(_account, _week);
+        (acctData, weight) = _checkpointAccount(_account, _week);
+        accountData[_account] = acctData;
     }
 
     function _checkpointAccount(address _account, uint _systemWeek) internal returns (AccountData memory acctData, uint weight){
@@ -326,7 +320,11 @@ contract YearnBoostedStaker {
 
         uint lastUpdateWeek = acctData.lastUpdateWeek;
 
-        require(_systemWeek >= lastUpdateWeek, "specified week is older than last update.");
+        if (_systemWeek == lastUpdateWeek) {
+            return (acctData, accountWeeklyWeights[_account][lastUpdateWeek]);
+        }
+
+        require(_systemWeek > lastUpdateWeek, "specified week is older than last update.");
 
         uint pending = uint(acctData.pendingStake); // deposited weight still growing.
         uint realized = acctData.realizedStake;
@@ -339,7 +337,6 @@ contract YearnBoostedStaker {
                     accountWeeklyWeights[_account][lastUpdateWeek] = weight; // Fill in any missing weeks
                 }
             }
-            accountData[_account].lastUpdateWeek = uint16(_systemWeek);
             acctData.lastUpdateWeek = uint16(_systemWeek);
             return (acctData, weight);
         }
@@ -378,8 +375,6 @@ contract YearnBoostedStaker {
             realizedStake: uint112(realized),
             lastUpdateWeek: uint16(_systemWeek)
         });
-
-        accountData[_account] = acctData;
     }
 
     /**
@@ -400,10 +395,10 @@ contract YearnBoostedStaker {
         uint pending = uint(acctData.pendingStake);
         
         uint16 lastUpdateWeek = acctData.lastUpdateWeek;
-        
-        uint weight = accountWeeklyWeights[_account][lastUpdateWeek];
 
         if (lastUpdateWeek >= _week) return accountWeeklyWeights[_account][_week]; 
+
+        uint weight = accountWeeklyWeights[_account][lastUpdateWeek];
         if (pending == 0) return weight;
 
         uint8 bitmap = acctData.updateWeeksBitmap;
