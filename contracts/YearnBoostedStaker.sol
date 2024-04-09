@@ -2,10 +2,7 @@
 pragma solidity ^0.8.22;
 
 import {IERC20, SafeERC20} from "@openzeppelin/contracts@v4.9.3/token/ERC20/utils/SafeERC20.sol";
-
-interface IToken {
-    function decimals() external view returns(uint8);
-}
+import {IERC20Metadata} from "@openzeppelin/contracts@v4.9.3/token/ERC20/extensions/IERC20Metadata.sol";
 
 contract YearnBoostedStaker {
     using SafeERC20 for IERC20;
@@ -24,7 +21,7 @@ contract YearnBoostedStaker {
     uint112 public globalGrowthRate;
     uint16 public globalLastUpdateWeek;
     mapping(uint week => uint weight) private globalWeeklyWeights;
-    mapping(uint week => uint weightToRealize) private globalWeeklyToRealize;
+    mapping(uint week => uint weightToRealize) public globalWeeklyToRealize;
 
     // Generic token interface.
     uint public totalSupply;
@@ -77,7 +74,7 @@ contract YearnBoostedStaker {
         owner = _owner;
         emit OwnershipTransferred(_owner);
         stakeToken = IERC20(_token);
-        decimals = IToken(_token).decimals();
+        decimals = IERC20Metadata(_token).decimals();
         require(
             _max_stake_growth_weeks > 0 &&
             _max_stake_growth_weeks <= 7,
@@ -515,7 +512,7 @@ contract YearnBoostedStaker {
         @param _account Account to query.
         @return ratio of account weight to gloabl weight in terms of 1e18.
     */
-    function getAccountWeightRatio(address _account) public view returns (uint) {
+    function getAccountWeightRatio(address _account) external view returns (uint) {
         return _getAccountWeightRatioAt(_account, getWeek());
     }
 

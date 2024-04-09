@@ -108,7 +108,7 @@ def staker(project, yprisma, user, gov, prisma_vault):
         yprisma, 
         4, # <-- Number of growth weeks
         start_time,
-        gov
+        gov,
     )
     yield staker
 
@@ -130,7 +130,6 @@ def rewards(project, user, staker, gov_token, stable_token, gov):
         project.SingleTokenRewardDistributor,
         staker,
         stable_token,
-        gov
     )
     yield rewards_contract
 
