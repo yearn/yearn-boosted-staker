@@ -138,7 +138,7 @@ contract YearnBoostedStaker {
         accountData[_account] = acctData;
         totalSupply += _amount;
         
-        stakeToken.transferFrom(msg.sender, address(this), uint(_amount));
+        stakeToken.safeTransferFrom(msg.sender, address(this), uint(_amount));
         emit Deposit(_account, systemWeek, _amount, accountWeight + weight, weight);
         
         return _amount;
@@ -191,7 +191,7 @@ contract YearnBoostedStaker {
         accountData[_account] = acctData;
         totalSupply += _amount;
 
-        stakeToken.transferFrom(msg.sender, address(this), uint(_amount));
+        stakeToken.safeTransferFrom(msg.sender, address(this), uint(_amount));
         emit Deposit(_account, systemWeek, _amount, accountWeight + instantWeight, instantWeight);
 
         return _amount;
@@ -287,7 +287,7 @@ contract YearnBoostedStaker {
 
         emit Withdraw(_account, systemWeek, _amount, newAccountWeight, weightToRemove);
         
-        stakeToken.transfer(_receiver, _amount);
+        stakeToken.safeTransfer(_receiver, _amount);
         
         return _amount;
     }
