@@ -169,6 +169,14 @@ contract SingleTokenRewardDistributor is WeekStart {
     }
 
     /**
+        @notice Get the sum total number of claimable tokens for a user across all his claimable weeks.
+    */
+    function claimable(address _account) external view returns (uint claimable) {
+        (uint claimStartWeek, uint claimEndWeek) = getSuggestedClaimRange(_account);
+        return _getTotalClaimableByRange(_account, claimStartWeek, claimEndWeek);
+    }
+
+    /**
         @dev Returns sum of tokens earned with the specified range of weeks.
     */
     function getTotalClaimableByRange(
