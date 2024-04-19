@@ -9,7 +9,6 @@ import {IERC20, SafeERC20} from "@openzeppelin/contracts@v4.9.3/token/ERC20/util
 contract SingleTokenRewardDistributor is WeekStart {
     using SafeERC20 for IERC20;
 
-    uint constant MAX_BPS = 10_000;
     uint constant PRECISION = 1e18;
     IYearnBoostedStaker public immutable staker;
     IERC20 public immutable rewardToken;
@@ -30,9 +29,8 @@ contract SingleTokenRewardDistributor is WeekStart {
     event ClaimerApproved(address indexed account, address indexed, bool approved);
 
     /**
-        @notice Allow permissionless deposits to the current week.
         @param _staker the staking contract to use for weight calculations.
-        @param _rewardToken address of reward token.
+        @param _rewardToken address of reward token to be used.
     */
     constructor(
         IYearnBoostedStaker _staker,
@@ -65,8 +63,8 @@ contract SingleTokenRewardDistributor is WeekStart {
         uint week = getWeek();
 
         if (_amount > 0) {
-            rewardToken.transferFrom(_target, address(this), _amount);
             weeklyRewardAmount[week] += _amount;
+            rewardToken.safeTransferFrom(_target, address(this), _amount);
             emit RewardDeposited(week, _target, _amount);
         }
     }
@@ -149,7 +147,7 @@ contract SingleTokenRewardDistributor is WeekStart {
         address recipient = info.recipient == address(0) ? _account : info.recipient;
         
         if (amountClaimed > 0) {
-            rewardToken.transfer(recipient, amountClaimed);
+            rewardToken.safeTransfer(recipient, amountClaimed);
             emit RewardsClaimed(_account, _claimEndWeek, amountClaimed);
         }
     }
@@ -171,13 +169,16 @@ contract SingleTokenRewardDistributor is WeekStart {
     /**
         @notice Get the sum total number of claimable tokens for a user across all his claimable weeks.
     */
-    function claimable(address _account) external view returns (uint claimable) {
+    function getClaimable(address _account) external view returns (uint claimable) {
         (uint claimStartWeek, uint claimEndWeek) = getSuggestedClaimRange(_account);
         return _getTotalClaimableByRange(_account, claimStartWeek, claimEndWeek);
     }
 
     /**
-        @dev Returns sum of tokens earned with the specified range of weeks.
+        @notice Returns sum of tokens earned with a specified range of weeks.
+        @param _account Account to query.
+        @param _claimStartWeek Week to begin querying from.
+        @param _claimEndWeek Week to end querying at.
     */
     function getTotalClaimableByRange(
         address _account,
@@ -195,8 +196,7 @@ contract SingleTokenRewardDistributor is WeekStart {
         uint _claimEndWeek
     ) internal view returns (uint claimableAmount) {
         for (uint i = _claimStartWeek; i <= _claimEndWeek; ++i) {
-            uint claimable = getClaimableAt(_account, i);
-            claimableAmount += claimable;
+            claimableAmount += getClaimableAt(_account, i);
         }
     }
 
@@ -205,7 +205,7 @@ contract SingleTokenRewardDistributor is WeekStart {
         @dev    This function is designed to be called prior to ranged claims to shorted the number of iterations
                 required to loop if possible.
     */
-    function getSuggestedClaimRange(address _account) external view returns (uint claimStartWeek, uint claimEndWeek) {
+    function getSuggestedClaimRange(address _account) public view returns (uint claimStartWeek, uint claimEndWeek) {
         uint currentWeek = getWeek();
         if (currentWeek == 0) return (0, 0);
         bool canClaim;
@@ -242,15 +242,14 @@ contract SingleTokenRewardDistributor is WeekStart {
         address _account, 
         uint _week
     ) public view returns (uint rewardAmount) {
-        uint currentWeek = getWeek();
-        if(_week >= currentWeek) return 0;
+        if(_week >= getWeek()) return 0;
         if(_week < accountInfo[_account].lastClaimWeek) return 0;
         uint rewardShare = computeSharesAt(_account, _week);
         uint totalWeeklyAmount = weeklyRewardAmount[_week];
         rewardAmount = rewardShare * totalWeeklyAmount / PRECISION;
     }
 
-    function _onlyClaimers(address _account) internal returns (bool approved) {
+    function _onlyClaimers(address _account) internal view returns (bool approved) {
         return approvedClaimer[_account][msg.sender] || _account == msg.sender;
     }
 
