@@ -183,7 +183,6 @@ contract YearnBoostedStaker {
             globalWeeklyToRealize[realizeWeek] += weight;
 
             uint8 mask = uint8(1 << _idx);
-            uint8 bitmap = acctData.updateWeeksBitmap;
             // Use bitwise or to ensure bit is flpped at target position.
             acctData.updateWeeksBitmap |= mask;
         }
