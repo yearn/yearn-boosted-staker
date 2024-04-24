@@ -31,7 +31,7 @@ contract YearnBoostedStaker {
     address public owner;
     address public pendingOwner;
     mapping(address account => mapping(address caller => ApprovalStatus approvalStatus)) public approvedCaller;
-    mapping(address depositor => bool approved) public approvedWeightedDepositor;
+    mapping(address staker => bool approved) public approvedWeightedStaker;
 
     struct AccountData {
         uint112 realizedStake;  // Amount of stake that has fully realized weight.
@@ -51,15 +51,15 @@ contract YearnBoostedStaker {
 
     enum ApprovalStatus {
         None,               // 0. Default value, indicating no approval
-        DepositOnly,        // 1. Approved for deposit only
-        WithdrawOnly,       // 2. Approved for withdrawal only
-        DepositAndWithdraw  // 3. Approved for both deposit and withdrawal
+        StakeOnly,          // 1. Approved for stake only
+        UnstakeOnly,        // 2. Approved for unstake only
+        StakeAndUnstake     // 3. Approved for both stake and unstake
     }
 
-    event Deposit(address indexed account, uint indexed week, uint amount, uint newUserWeight, uint weightAdded);
-    event Withdraw(address indexed account, uint indexed week, uint amount, uint newUserWeight, uint weightRemoved);
+    event Staked(address indexed account, uint indexed week, uint amount, uint newUserWeight, uint weightAdded);
+    event Unstaked(address indexed account, uint indexed week, uint amount, uint newUserWeight, uint weightRemoved);
     event ApprovedCallerSet(address indexed account, address indexed caller, ApprovalStatus status);
-    event WeightedDepositorSet(address indexed depositor, bool approved);
+    event WeightedStakerSet(address indexed staker, bool approved);
     event OwnershipTransferred(address indexed newOwner);
 
     /**
@@ -92,27 +92,27 @@ contract YearnBoostedStaker {
     }
 
     /**
-        @notice Deposit tokens into the staking contract.
-        @param _amount Amount of tokens to deposit.
+        @notice Stake tokens into the staking contract.
+        @param _amount Amount of tokens to stake.
     */
-    function deposit(uint _amount) external returns (uint) {
-        return _deposit(msg.sender, _amount);
+    function stake(uint _amount) external returns (uint) {
+        return _stake(msg.sender, _amount);
     }
 
-    function depositFor(address _account, uint _amount) external returns (uint) {
+    function stakeFor(address _account, uint _amount) external returns (uint) {
         if (msg.sender != _account) {
             ApprovalStatus status = approvedCaller[_account][msg.sender];
             require(
-                status == ApprovalStatus.DepositAndWithdraw ||
-                status == ApprovalStatus.DepositOnly,
+                status == ApprovalStatus.StakeAndUnstake ||
+                status == ApprovalStatus.StakeOnly,
                 "!Permission"
             );
         }
         
-        return _deposit(_account, _amount);
+        return _stake(_account, _amount);
     }
 
-    function _deposit(address _account, uint _amount) internal returns (uint) {
+    function _stake(address _account, uint _amount) internal returns (uint) {
         require(_amount > 1 && _amount < type(uint112).max, "invalid amount");
 
         // Before going further, let's sync our account and global weights
@@ -139,22 +139,22 @@ contract YearnBoostedStaker {
         totalSupply += _amount;
         
         stakeToken.safeTransferFrom(msg.sender, address(this), uint(_amount));
-        emit Deposit(_account, systemWeek, _amount, accountWeight + weight, weight);
+        emit Staked(_account, systemWeek, _amount, accountWeight + weight, weight);
         
         return _amount;
     }
 
     /**
-        @notice Allows an option for an approved helper to deposit to any account at any weight week.
-        @dev A deposit using this method only effects weight in current and future weeks. It does not backfill prior weeks.
-        @param _amount Amount to deposit
-        @param _idx Index of the week to deposit to relative to current week. E.g. 0 = current week, 4 = current plus 4 growth weeks.
-        @return amount number of tokens deposited
+        @notice Allows an option for an approved helper to stake to any account at any weight week.
+        @dev A stake using this method only effects weight in current and future weeks. It does not backfill prior weeks.
+        @param _amount Amount to stake
+        @param _idx Index of the week to stake to relative to current week. E.g. 0 = current week, 4 = current plus 4 growth weeks.
+        @return amount of tokens staked
     */
-    function depositAsWeighted(address _account, uint _amount, uint _idx) external returns (uint) {
+    function stakeAsWeighted(address _account, uint _amount, uint _idx) external returns (uint) {
         require(
-            approvedWeightedDepositor[msg.sender],
-            "!approvedDepositor"
+            approvedWeightedStaker[msg.sender],
+            "!approvedStaker"
         );
         require(_idx <= MAX_STAKE_GROWTH_WEEKS, "Invalid week index.");
         require(_amount > 1 && _amount < type(uint112).max, "invalid amount");
@@ -191,36 +191,36 @@ contract YearnBoostedStaker {
         totalSupply += _amount;
 
         stakeToken.safeTransferFrom(msg.sender, address(this), uint(_amount));
-        emit Deposit(_account, systemWeek, _amount, accountWeight + instantWeight, instantWeight);
+        emit Staked(_account, systemWeek, _amount, accountWeight + instantWeight, instantWeight);
 
         return _amount;
     }
 
     /**
-        @notice Withdraw tokens from staking contract.
-        @dev During partial withdrawals, this will always remove from the least-weighted first.
+        @notice Unstake tokens from the contract.
+        @dev During partial unstake, this will always remove from the least-weighted first.
     */
-    function withdraw(uint _amount, address _receiver) external returns (uint) {
-        return _withdraw(msg.sender, _amount, _receiver);
+    function unstake(uint _amount, address _receiver) external returns (uint) {
+        return _unstake(msg.sender, _amount, _receiver);
     }
 
     /**
-        @notice Withdraw tokens from staking contract on behalf of another user.
-        @dev During partial withdrawals, this will always remove from the least-weighted first.
+        @notice Unstake tokens from the contract on behalf of another user.
+        @dev During partial unstake, this will always remove from the least-weighted first.
     */
-    function withdrawFor(address _account, uint _amount, address _receiver) external returns (uint) {
+    function unstakeFor(address _account, uint _amount, address _receiver) external returns (uint) {
         if (msg.sender != _account) {
             ApprovalStatus status = approvedCaller[_account][msg.sender];
             require(
-                status == ApprovalStatus.DepositAndWithdraw ||
-                status == ApprovalStatus.WithdrawOnly,
+                status == ApprovalStatus.StakeAndUnstake ||
+                status == ApprovalStatus.UnstakeOnly,
                 "!Permission"
             );
         }
-        return _withdraw(_account, _amount, _receiver);
+        return _unstake(_account, _amount, _receiver);
     }
 
-    function _withdraw(address _account, uint _amount, address _receiver) internal returns (uint) {
+    function _unstake(address _account, uint _amount, address _receiver) internal returns (uint) {
         require(_amount > 1 && _amount < type(uint112).max, "invalid amount");
         uint systemWeek = getWeek();
 
@@ -228,7 +228,7 @@ contract YearnBoostedStaker {
         (AccountData memory acctData, ) = _checkpointAccount(_account, systemWeek);
         _checkpointGlobal(systemWeek);
 
-        // Here we do work to withdraw from most recent (least weighted) deposits first
+        // Here we do work to pull from most recent (least weighted) stake first
         uint8 bitmap = acctData.updateWeeksBitmap;
         uint weightToRemove;
 
@@ -284,7 +284,7 @@ contract YearnBoostedStaker {
         
         totalSupply -= _amount;
 
-        emit Withdraw(_account, systemWeek, _amount, newAccountWeight, weightToRemove);
+        emit Unstaked(_account, systemWeek, _amount, newAccountWeight, weightToRemove);
         
         stakeToken.safeTransfer(_receiver, _amount);
         
@@ -545,7 +545,7 @@ contract YearnBoostedStaker {
     }
 
     /**
-        @notice Allow another address to deposit or withdraw on behalf of. Useful for zaps and other functionality.
+        @notice Allow another address to staje or unstake on behalf of. Useful for zaps and other functionality.
         @param _caller Address of the caller to approve or unapprove.
         @param _status Enum representing various approval status states.
     */
@@ -555,14 +555,14 @@ contract YearnBoostedStaker {
     }
 
     /**
-        @notice Allow owner to specify an account which has ability to depositAsWeighted.
-        @param _depositor Address of account with depositor permissions.
-        @param _approved Approve or unapprove the depositor.
+        @notice Allow owner to specify an account which has ability to stakeAsWeighted.
+        @param _staker Address of account with staker permissions.
+        @param _approved Approve or unapprove the staker.
     */
-    function setWeightedDepositor(address _depositor, bool _approved) external {
+    function setWeightedStaker(address _staker, bool _approved) external {
         require(msg.sender == owner, "!authorized");
-        approvedWeightedDepositor[_depositor] = _approved;
-        emit WeightedDepositorSet(_depositor, _approved);
+        approvedWeightedStaker[_staker] = _approved;
+        emit WeightedStakerSet(_staker, _approved);
     }
 
     /**

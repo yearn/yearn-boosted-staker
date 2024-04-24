@@ -2,6 +2,8 @@
 .build/
 .cache/
 contracts/.cache
+tests/
+scripts/
 
 # Python
 .env
@@ -13,7 +15,3 @@ contracts/.cache
 __pycache__
 venv
 .hypothesis
-TODO.md
-StakingZap.sol
-Staker.sol.hide
-test_staker.py.hide
