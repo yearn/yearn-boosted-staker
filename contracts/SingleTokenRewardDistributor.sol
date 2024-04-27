@@ -130,16 +130,16 @@ contract SingleTokenRewardDistributor is WeekStart {
         uint _claimStartWeek,
         uint _claimEndWeek
     ) internal returns (uint amountClaimed) {
+        uint currentWeek = getWeek();
+        if(_claimEndWeek >= currentWeek) return 0;
 
         AccountInfo storage info = accountInfo[_account];
-        uint currentWeek = getWeek();
         
         // Sanitize inputs
         uint _minStartWeek = info.lastClaimWeek == 0 ? START_WEEK : info.lastClaimWeek;
         _claimStartWeek = max(_minStartWeek, _claimStartWeek);
+        if(_claimStartWeek > _claimEndWeek) return 0;
         
-        require(_claimStartWeek <= _claimEndWeek, "claimStartWeek > claimEndWeek");
-        require(_claimEndWeek < currentWeek, "claimEndWeek >= currentWeek");
         amountClaimed = _getTotalClaimableByRange(_account, _claimStartWeek, _claimEndWeek);
         
         _claimEndWeek += 1;
