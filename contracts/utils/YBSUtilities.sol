@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GNU AGPLv3
 pragma solidity ^0.8.22;
 
-import {IERC20} from "@openzeppelin/contracts@v4.9.3/token/ERC20/IERC20.sol";
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 import "../interfaces/IYearnBoostedStaker.sol";
 import "../interfaces/IRewardsDistributor.sol";
@@ -9,6 +9,7 @@ import "../interfaces/IRewardsDistributor.sol";
 contract YBSUtilities {
 
     uint constant PRECISION = 1e18;
+    uint constant WEEKS_PER_YEAR = 52;
     uint public immutable MAX_STAKE_GROWTH_WEEKS;
     IERC20 public immutable TOKEN;
     IYearnBoostedStaker public immutable YBS;
@@ -56,6 +57,7 @@ contract YBSUtilities {
             _rewardTokenPrice * 
             PRECISION /
             (supply * _stakeTokenPrice)
+            * WEEKS_PER_YEAR
         );
     }
 
@@ -64,8 +66,8 @@ contract YBSUtilities {
         if(avgApr == 0) return (0, 0);
         uint avgBoost = getGlobalAverageBoostMultiplier();
         if(avgBoost == 0) return (0, 0);
-        uint minApr = avgApr * _minBoost() / avgBoost;
-        uint maxApr = avgApr * _maxBoost() / avgBoost;
+        uint minApr = avgApr * _minBoost() * WEEKS_PER_YEAR / avgBoost;
+        uint maxApr = avgApr * _maxBoost() * WEEKS_PER_YEAR / avgBoost;
         return (minApr, maxApr);
     }
 
@@ -96,7 +98,7 @@ contract YBSUtilities {
         if (userRewards == 0) return 0;
         uint userStakedBalance = YBS.balanceOf(_account);
         if (userStakedBalance == 0) return 0;
-        return (_rewardTokenPrice * userRewards) / (userStakedBalance * _stakeTokenPrice);
+        return (_rewardTokenPrice * userRewards) * WEEKS_PER_YEAR / (userStakedBalance * _stakeTokenPrice);
     }
     
     function weeklyRewardAmount() external view returns (uint) {
