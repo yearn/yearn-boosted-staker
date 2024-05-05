@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GNU AGPLv3
 pragma solidity ^0.8.22;
 
-import "interfaces/IYearnBoostedStaker.sol";
 import "utils/WeekStart.sol";
+import {IYearnBoostedStaker} from "interfaces/IYearnBoostedStaker.sol";
 import {IERC20, SafeERC20} from "@openzeppelin/contracts@v4.9.3/token/ERC20/utils/SafeERC20.sol";
 
 
@@ -13,6 +13,7 @@ contract SingleTokenRewardDistributor is WeekStart {
     IYearnBoostedStaker public immutable staker;
     IERC20 public immutable rewardToken;
     uint public immutable START_WEEK;
+    uint immutable MAX_STAKE_GROWTH_WEEKS;
 
     struct AccountInfo {
         address recipient; // Who rewards will be sent to. Cheaper to store here than in dedicated mapping.
@@ -40,6 +41,7 @@ contract SingleTokenRewardDistributor is WeekStart {
         staker = _staker;
         rewardToken = _rewardToken;
         START_WEEK = staker.getWeek();
+        MAX_STAKE_GROWTH_WEEKS = staker.MAX_STAKE_GROWTH_WEEKS();
     }
 
     /**
@@ -60,9 +62,17 @@ contract SingleTokenRewardDistributor is WeekStart {
     }
 
     function _depositReward(address _target, uint _amount) internal {
-        uint week = getWeek();
-
         if (_amount > 0) {
+            uint week = getWeek();
+
+            // The following logic prevents lost rewards by blocking deposits to weeks where we know
+            // there will be no users with a claim. This has to do with the security measure 
+            // implemented in `computeSharesAt`, blocking users from earning rewards in first week.
+            require(week != 0, "Cannot deposit to first week");
+            uint globalWeight = staker.getGlobalWeightAt(week - 1);
+            globalWeight -= staker.globalWeeklyToRealize(week - 1 + MAX_STAKE_GROWTH_WEEKS).weightPersistentCopy;
+            require(globalWeight != 0, "Cannot deposit to weightless week");
+
             weeklyRewardAmount[week] += _amount;
             rewardToken.safeTransferFrom(_target, address(this), _amount);
             emit RewardDeposited(week, _target, _amount);
@@ -154,15 +164,23 @@ contract SingleTokenRewardDistributor is WeekStart {
 
     /**
         @notice Helper function used to determine overal share of rewards at a particular week.
-        @dev    Computing shares in past weeks is accurate. However, current week computations will not accurate 
-                as week the is not yet finalized.
+        @dev    IMPORTANT: This calculation cannot be relied upon to return strictly the users weight
+                against global weight as it implements custom logic to ignore the first week of each deposit.
+        @dev    Computing shares in past weeks is accurate. However, current week computations will not 
+                be accurate until week is finalized.
         @dev    Results scaled to PRECSION.
     */
     function computeSharesAt(address _account, uint _week) public view returns (uint rewardShare) {
         require(_week <= getWeek(), "Invalid week");
         uint acctWeight = staker.getAccountWeightAt(_account, _week);
-        if (acctWeight == 0) return 0; // User has no weight.
         uint globalWeight = staker.getGlobalWeightAt(_week);
+
+        // As a security measure, we don't distribute rewards to YBS deposits on their first full week of staking.
+        // To acheive this, we lookup the weight that was added in the target week and ignore it.
+        acctWeight -= staker.accountWeeklyToRealize(_account, _week + MAX_STAKE_GROWTH_WEEKS).weightPersistentCopy;
+        if (acctWeight == 0) return 0;
+        globalWeight -= staker.globalWeeklyToRealize(_week + MAX_STAKE_GROWTH_WEEKS).weightPersistentCopy;
+
         return acctWeight * PRECISION / globalWeight;
     }
 
