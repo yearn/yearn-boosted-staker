@@ -70,7 +70,7 @@ contract SingleTokenRewardDistributor is WeekStart {
             // implemented in `computeSharesAt`, blocking users from earning rewards in first week.
             require(week != 0, "Cannot deposit to first week");
             uint globalWeight = staker.getGlobalWeightAt(week - 1);
-            globalWeight -= staker.globalWeeklyToRealize(week - 1 + MAX_STAKE_GROWTH_WEEKS).weightPersistentCopy;
+            globalWeight -= staker.globalWeeklyToRealize(week - 1 + MAX_STAKE_GROWTH_WEEKS).weightPersistent;
             require(globalWeight != 0, "Cannot deposit to weightless week");
 
             weeklyRewardAmount[week] += _amount;
@@ -177,9 +177,9 @@ contract SingleTokenRewardDistributor is WeekStart {
 
         // As a security measure, we don't distribute rewards to YBS deposits on their first full week of staking.
         // To acheive this, we lookup the weight that was added in the target week and ignore it.
-        acctWeight -= staker.accountWeeklyToRealize(_account, _week + MAX_STAKE_GROWTH_WEEKS).weightPersistentCopy;
+        acctWeight -= staker.accountWeeklyToRealize(_account, _week + MAX_STAKE_GROWTH_WEEKS).weightPersistent;
         if (acctWeight == 0) return 0;
-        globalWeight -= staker.globalWeeklyToRealize(_week + MAX_STAKE_GROWTH_WEEKS).weightPersistentCopy;
+        globalWeight -= staker.globalWeeklyToRealize(_week + MAX_STAKE_GROWTH_WEEKS).weightPersistent;
 
         return acctWeight * PRECISION / globalWeight;
     }

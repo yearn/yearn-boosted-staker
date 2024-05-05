@@ -32,7 +32,7 @@ contract YearnBoostedStaker {
     mapping(address account => mapping(address caller => ApprovalStatus approvalStatus)) public approvedCaller;
 
     struct ToRealize {
-        uint112 weightPersistentCopy;
+        uint112 weightPersistent;
         uint112 weight;
     }
 
@@ -128,12 +128,12 @@ contract YearnBoostedStaker {
         uint realizeWeek = systemWeek + MAX_STAKE_GROWTH_WEEKS;
         ToRealize memory toRealize = accountWeeklyToRealize[_account][realizeWeek];
         toRealize.weight += uint112(weight);
-        toRealize.weightPersistentCopy += uint112(weight);
+        toRealize.weightPersistent += uint112(weight);
         accountWeeklyToRealize[_account][realizeWeek] = toRealize;
 
         toRealize = globalWeeklyToRealize[realizeWeek];
         toRealize.weight += uint112(weight);
-        toRealize.weightPersistentCopy += uint112(weight);
+        toRealize.weightPersistent += uint112(weight);
         globalWeeklyToRealize[realizeWeek] = toRealize;
         
         accountWeeklyWeights[_account][systemWeek] = accountWeight + weight;
@@ -200,8 +200,8 @@ contract YearnBoostedStaker {
                         accountWeeklyToRealize[_account][weekToCheck].weight = 0;
                         globalWeeklyToRealize[weekToCheck].weight -= uint112(pending);
                         if (weekIndex == 0) { // Current system week
-                            accountWeeklyToRealize[_account][weekToCheck].weightPersistentCopy = 0;
-                            globalWeeklyToRealize[weekToCheck].weightPersistentCopy -= uint112(pending);
+                            accountWeeklyToRealize[_account][weekToCheck].weightPersistent = 0;
+                            globalWeeklyToRealize[weekToCheck].weightPersistent -= uint112(pending);
                         }
                         bitmap = bitmap ^ mask;
                         amountNeeded -= pending;
@@ -212,8 +212,8 @@ contract YearnBoostedStaker {
                         accountWeeklyToRealize[_account][weekToCheck].weight -= uint112(amountNeeded);
                         globalWeeklyToRealize[weekToCheck].weight -= uint112(amountNeeded);
                         if (weekIndex == 0) { // Current system week
-                            accountWeeklyToRealize[_account][weekToCheck].weightPersistentCopy -= uint112(amountNeeded);
-                            globalWeeklyToRealize[weekToCheck].weightPersistentCopy -= uint112(amountNeeded);
+                            accountWeeklyToRealize[_account][weekToCheck].weightPersistent -= uint112(amountNeeded);
+                            globalWeeklyToRealize[weekToCheck].weightPersistent -= uint112(amountNeeded);
                         }
                         if (amountNeeded == pending) bitmap = bitmap ^ mask;
                         amountNeeded = 0;

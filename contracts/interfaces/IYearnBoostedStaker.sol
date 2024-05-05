@@ -12,7 +12,7 @@ interface IYearnBoostedStaker {
     }
 
     struct ToRealize {
-        uint112 weightPersistentCopy;
+        uint112 weightPersistent;
         uint112 weight;
     }
 
