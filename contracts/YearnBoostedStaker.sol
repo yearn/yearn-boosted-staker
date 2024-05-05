@@ -16,20 +16,24 @@ contract YearnBoostedStaker {
     mapping(address account => AccountData data) public accountData;
     mapping(address account => mapping(uint week => uint weight)) private accountWeeklyWeights;
     mapping(address account => mapping(uint week => ToRealize weight)) public accountWeeklyToRealize;
+    mapping(address account => mapping(uint week => uint amount)) public accountWeeklyMaxStake;
 
     // Global weight tracking stats vars.
     uint112 public globalGrowthRate;
     uint16 public globalLastUpdateWeek;
     mapping(uint week => uint weight) private globalWeeklyWeights;
     mapping(uint week => ToRealize weight) public globalWeeklyToRealize;
-
+    mapping(uint week => uint amount) public globalWeeklyMaxStake;
 
     // Generic token interface.
     uint public totalSupply;
     uint8 public immutable decimals;
 
     // Permissioned roles
+    address public owner;
+    address public pendingOwner;
     mapping(address account => mapping(address caller => ApprovalStatus approvalStatus)) public approvedCaller;
+    mapping(address staker => bool approved) public approvedWeightedStaker;
 
     struct ToRealize {
         uint112 weightPersistent;
@@ -62,6 +66,8 @@ contract YearnBoostedStaker {
     event Staked(address indexed account, uint indexed week, uint amount, uint newUserWeight, uint weightAdded);
     event Unstaked(address indexed account, uint indexed week, uint amount, uint newUserWeight, uint weightRemoved);
     event ApprovedCallerSet(address indexed account, address indexed caller, ApprovalStatus status);
+    event OwnershipTransferred(address indexed newOwner);
+    event WeightedStakerSet(address indexed staker, bool approved);
 
     /**
         @param _token The token to be staked.
@@ -71,7 +77,9 @@ contract YearnBoostedStaker {
                             useful if needed to line up with week count in another system.
                             Passing a value of 0 will start at block.timestamp.
     */
-    constructor(address _token, uint _max_stake_growth_weeks, uint _start_time) {
+    constructor(address _token, uint _max_stake_growth_weeks, uint _start_time, address _owner) {
+        owner = _owner;
+        emit OwnershipTransferred(_owner);
         stakeToken = IERC20(_token);
         decimals = IERC20Metadata(_token).decimals();
         require(
@@ -146,6 +154,50 @@ contract YearnBoostedStaker {
         stakeToken.safeTransferFrom(msg.sender, address(this), uint(_amount));
         emit Staked(_account, systemWeek, _amount, accountWeight + weight, weight);
         
+        return _amount;
+    }
+
+    /**
+        @notice Allows an option for an approved helper to stake to any account at any weight week.
+        @dev A stake using this method only effects weight in current and future weeks. It does not backfill prior weeks.
+        @param _amount Amount to stake
+        @return amount of tokens staked
+    */
+    function stakeAsMaxWeighted(address _account, uint _amount) external returns (uint) {
+        require(
+            approvedWeightedStaker[msg.sender],
+            "!approvedStaker"
+        );
+        require(_amount > 1 && _amount < type(uint112).max, "invalid amount");
+
+        // Before going further, let's sync our account and global weights
+        uint systemWeek = getWeek();
+        (AccountData memory acctData, uint accountWeight) = _checkpointAccount(_account, systemWeek);
+        uint112 globalWeight = uint112(_checkpointGlobal(systemWeek));
+
+        uint weight = _amount >> 1;
+        _amount = weight << 1;
+        acctData.realizedStake += uint112(weight);        
+        weight = weight * (MAX_STAKE_GROWTH_WEEKS + 1);
+
+        // Note: The usage of `stakeAsMaxWeighted` breaks a guarantee that would otherwise allow us to derive account + global
+        // amount deposited at any week using `weeklyToRealize` variables.
+        // To make up for this, we introduce the following two variables that are meant to preserve the ability for
+        // on-chain integrators to re-build it.
+        accountWeeklyMaxStake[_account][systemWeek] += _amount;
+        globalWeeklyMaxStake[systemWeek] += _amount;
+
+        accountWeeklyWeights[_account][systemWeek] = accountWeight + weight;
+        globalWeeklyWeights[systemWeek] = globalWeight + weight;
+
+        
+
+        accountData[_account] = acctData;
+        totalSupply += _amount;
+
+        stakeToken.safeTransferFrom(msg.sender, address(this), uint(_amount));
+        emit Staked(_account, systemWeek, _amount, accountWeight + weight, weight);
+
         return _amount;
     }
 
@@ -484,6 +536,45 @@ contract YearnBoostedStaker {
     function setApprovedCaller(address _caller, ApprovalStatus _status) external {
         approvedCaller[msg.sender][_caller] = _status;
         emit ApprovedCallerSet(msg.sender, _caller, _status);
+    }
+
+    /**
+        @notice Allow owner to specify an account which has ability to stakeAsWeighted.
+        @param _staker Address of account with staker permissions.
+        @param _approved Approve or unapprove the staker.
+    */
+    function setWeightedStaker(address _staker, bool _approved) external {
+        require(msg.sender == owner, "!authorized");
+        approvedWeightedStaker[_staker] = _approved;
+        emit WeightedStakerSet(_staker, _approved);
+    }
+
+    /**
+        @notice Set a pending owner which can later be accepted.
+        @param _pendingOwner Address of the new owner.
+    */
+    function transferOwnership(address _pendingOwner) external {
+        require(msg.sender == owner, "!authorized");
+        pendingOwner = _pendingOwner;
+    }
+
+    /**
+        @notice Allow pending owner to accept ownership
+    */
+    function acceptOwnership() external {
+        require(msg.sender == pendingOwner, "!authorized");
+        owner = msg.sender;
+        pendingOwner = address(0);
+        emit OwnershipTransferred(msg.sender);
+    }
+
+    function sweep(address _token) external {
+        require(msg.sender == owner, "!authorized");
+        uint amount = IERC20(_token).balanceOf(address(this));
+        if (_token == address(stakeToken)) {
+            amount = amount - totalSupply;
+        }
+        if (amount > 0) IERC20(_token).safeTransfer(owner, amount);
     }
 
     function getWeek() public view returns (uint week) {
