@@ -29,8 +29,6 @@ contract YearnBoostedStaker {
     uint8 public immutable decimals;
 
     // Permissioned roles
-    address public owner;
-    address public pendingOwner;
     mapping(address account => mapping(address caller => ApprovalStatus approvalStatus)) public approvedCaller;
 
     struct ToRealize {
@@ -64,7 +62,6 @@ contract YearnBoostedStaker {
     event Staked(address indexed account, uint indexed week, uint amount, uint newUserWeight, uint weightAdded);
     event Unstaked(address indexed account, uint indexed week, uint amount, uint newUserWeight, uint weightRemoved);
     event ApprovedCallerSet(address indexed account, address indexed caller, ApprovalStatus status);
-    event OwnershipTransferred(address indexed newOwner);
 
     /**
         @param _token The token to be staked.
@@ -74,9 +71,7 @@ contract YearnBoostedStaker {
                             useful if needed to line up with week count in another system.
                             Passing a value of 0 will start at block.timestamp.
     */
-    constructor(address _token, uint _max_stake_growth_weeks, uint _start_time, address _owner) {
-        owner = _owner;
-        emit OwnershipTransferred(_owner);
+    constructor(address _token, uint _max_stake_growth_weeks, uint _start_time) {
         stakeToken = IERC20(_token);
         decimals = IERC20Metadata(_token).decimals();
         require(
@@ -489,34 +484,6 @@ contract YearnBoostedStaker {
     function setApprovedCaller(address _caller, ApprovalStatus _status) external {
         approvedCaller[msg.sender][_caller] = _status;
         emit ApprovedCallerSet(msg.sender, _caller, _status);
-    }
-
-    /**
-        @notice Set a pending owner which can later be accepted.
-        @param _pendingOwner Address of the new owner.
-    */
-    function transferOwnership(address _pendingOwner) external {
-        require(msg.sender == owner, "!authorized");
-        pendingOwner = _pendingOwner;
-    }
-
-    /**
-        @notice Allow pending owner to accept ownership
-    */
-    function acceptOwnership() external {
-        require(msg.sender == pendingOwner, "!authorized");
-        owner = msg.sender;
-        pendingOwner = address(0);
-        emit OwnershipTransferred(msg.sender);
-    }
-
-    function sweep(address _token) external {
-        require(msg.sender == owner, "!authorized");
-        uint amount = IERC20(_token).balanceOf(address(this));
-        if (_token == address(stakeToken)) {
-            amount = amount - totalSupply;
-        }
-        if (amount > 0) IERC20(_token).safeTransfer(owner, amount);
     }
 
     function getWeek() public view returns (uint week) {
