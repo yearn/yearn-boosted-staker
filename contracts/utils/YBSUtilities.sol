@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GNU AGPLv3
 pragma solidity ^0.8.22;
 
-import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {IERC20} from "@openzeppelin/contracts@v4.9.3/token/ERC20/IERC20.sol";
 
 import "../interfaces/IYearnBoostedStaker.sol";
 import "../interfaces/IRewardsDistributor.sol";
@@ -66,8 +66,8 @@ contract YBSUtilities {
         if(avgApr == 0) return (0, 0);
         uint avgBoost = getGlobalAverageBoostMultiplier();
         if(avgBoost == 0) return (0, 0);
-        uint minApr = avgApr * _minBoost() * WEEKS_PER_YEAR / avgBoost;
-        uint maxApr = avgApr * _maxBoost() * WEEKS_PER_YEAR / avgBoost;
+        uint minApr = avgApr * _minBoost() / avgBoost;
+        uint maxApr = avgApr * _maxBoost() / avgBoost;
         return (minApr, maxApr);
     }
 
