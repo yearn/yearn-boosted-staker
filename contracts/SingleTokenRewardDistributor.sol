@@ -28,6 +28,7 @@ contract SingleTokenRewardDistributor is WeekStart {
     event RewardsClaimed(address indexed account, uint indexed week, uint rewardAmount);
     event RecipientConfigured(address indexed account, address indexed recipient);
     event ClaimerApproved(address indexed account, address indexed, bool approved);
+    event RewardPushed(uint indexed fromWeek, uint indexed toWeek, uint amount);
 
     /**
         @param _staker the staking contract to use for weight calculations.
@@ -64,19 +65,43 @@ contract SingleTokenRewardDistributor is WeekStart {
     function _depositReward(address _target, uint _amount) internal {
         if (_amount > 0) {
             uint week = getWeek();
-
-            // The following logic prevents lost rewards by blocking deposits to weeks where we know
-            // there will be no users with a claim. This has to do with the security measure 
-            // implemented in `computeSharesAt`, blocking users from earning rewards in first week.
-            require(week != 0, "Cannot deposit to first week");
-            uint globalWeight = staker.getGlobalWeightAt(week - 1);
-            globalWeight -= staker.globalWeeklyToRealize(week - 1 + MAX_STAKE_GROWTH_WEEKS).weightPersistent;
-            require(globalWeight != 0, "Cannot deposit to weightless week");
-
             weeklyRewardAmount[week] += _amount;
             rewardToken.safeTransferFrom(_target, address(this), _amount);
             emit RewardDeposited(week, _target, _amount);
         }
+    }
+
+    /**
+        @notice Push inaccessible rewards to current week.
+        @dev    In rare circumstances, rewards may have been deposited to a week where no adjusted weight exists.
+                This function allows us to recover rewards to the current week.
+        @param _week the week to push rewards from.
+        @return true if operation was successful.
+    */
+    function pushRewards(uint _week) external returns (bool) {
+        uint week = getWeek();
+        // The following logic prevents unrecoverable rewards by blocking deposits to weeks where we know
+        // there will be no users with a claim. This has to do with the security measure 
+        // implemented in `computeSharesAt`, blocking amounts from earning rewards in their 
+        // first week after staking.
+        uint amount = pushableRewards(_week);
+        if(amount == 0) return false;
+        weeklyRewardAmount[_week] = 0;
+        weeklyRewardAmount[week] += amount;
+        emit RewardPushed(_week, week, amount);
+        return true;
+    }
+
+    /**
+        @notice Helper view function to check if any rewards are pushable.
+        @param _week the week to push rewards from.
+        @return uint representing rewards amount that is pushable.
+    */
+    function pushableRewards(uint _week) public view returns (uint) {
+        uint week = getWeek();
+        if(_week >= week) return 0;
+        if(adjustedGlobalWeightAt(_week) != 0) return 0;
+        return weeklyRewardAmount[_week];
     }
 
     /**
@@ -170,18 +195,29 @@ contract SingleTokenRewardDistributor is WeekStart {
                 be accurate until week is finalized.
         @dev    Results scaled to PRECSION.
     */
-    function computeSharesAt(address _account, uint _week) public view returns (uint rewardShare) {
+    function computeSharesAt(address _account, uint _week) public view returns (uint) {
         require(_week <= getWeek(), "Invalid week");
-        uint acctWeight = staker.getAccountWeightAt(_account, _week);
-        uint globalWeight = staker.getGlobalWeightAt(_week);
-
         // As a security measure, we don't distribute rewards to YBS deposits on their first full week of staking.
         // To acheive this, we lookup the weight that was added in the target week and ignore it.
-        acctWeight -= staker.accountWeeklyToRealize(_account, _week + MAX_STAKE_GROWTH_WEEKS).weightPersistent;
-        if (acctWeight == 0) return 0;
-        globalWeight -= staker.globalWeeklyToRealize(_week + MAX_STAKE_GROWTH_WEEKS).weightPersistent;
+        uint adjAcctWeight = adjustedAccountWeightAt(_account, _week);
+        if (adjAcctWeight == 0) return 0;
+        
+        uint adjGlobalWeight = adjustedGlobalWeightAt(_week);
+        if (adjGlobalWeight == 0) return 0;
 
-        return acctWeight * PRECISION / globalWeight;
+        return adjAcctWeight * PRECISION / adjGlobalWeight;
+    }
+
+    function adjustedAccountWeightAt(address _account, uint _week) public view returns (uint) {
+        uint acctWeight = staker.getAccountWeightAt(_account, _week);
+        if (acctWeight == 0) return 0;
+        return acctWeight - staker.accountWeeklyToRealize(_account, _week + MAX_STAKE_GROWTH_WEEKS).weightPersistent;
+    }
+
+    function adjustedGlobalWeightAt(uint _week) public view returns (uint) {
+        uint globalWeight = staker.getGlobalWeightAt(_week);
+        if (globalWeight == 0) return 0;
+        return globalWeight - staker.globalWeeklyToRealize(_week + MAX_STAKE_GROWTH_WEEKS).weightPersistent;
     }
 
     /**

@@ -59,7 +59,7 @@ def prisma():
     yield Contract('0xdA47862a83dac0c112BA89c6abC2159b95afd71C')
 
 @pytest.fixture(scope="session")
-def yprisma_whale(accounts, fee_receiver, user, yprisma, user2, user3, rando):
+def yprisma_whale(accounts, fee_receiver, user, yprisma, user2, user3, rando, gov):
     whale = accounts['0x69833361991ed76f9e8DBBcdf9ea1520fEbFb4a7']
     whale.balance += 10 ** 18
     yprisma.transfer(user, 100_000 * 10 ** 18, sender=whale)
@@ -67,6 +67,7 @@ def yprisma_whale(accounts, fee_receiver, user, yprisma, user2, user3, rando):
     yprisma.transfer(user3, 100_000 * 10 ** 18, sender=whale)
     yprisma.transfer(fee_receiver, 200_000 * 10 ** 18, sender=whale)
     yprisma.transfer(rando, 100_000 * 10 ** 18, sender=whale)
+    yprisma.transfer(gov, 100_000 * 10 ** 18, sender=whale)
     yield whale
 
 
@@ -152,27 +153,31 @@ def fee_receiver_acc(rewards, accounts, gov_token, stable_token):
     yield fr_account
 
 @pytest.fixture(scope="function")
-def setup_rewards(user, accounts, staker, gov, user2, yprisma, yvmkusd, rewards, fee_receiver):
+def stake_and_deposit_rewards(user, accounts, staker, gov, user3, user2, yprisma, yvmkusd, rewards, fee_receiver):
     fr_account = accounts[fee_receiver.address]
     fr_account.balance += 20 ** 18
     yprisma.approve(staker, 2**256-1, sender=user)
     yprisma.approve(staker, 2**256-1, sender=user2)
+    yprisma.approve(staker, 2**256-1, sender=gov)
+    yprisma.approve(staker, 2**256-1, sender=user3)
     yprisma.approve(rewards, 2**256-1, sender=fr_account)
     yvmkusd.approve(rewards, 2**256-1, sender=fr_account)
-
-    # stake to staker
-    amt = 10_000 * 10 ** 18
-    staker.stake(amt, sender=user)
-    staker.stake(amt, sender=user2)
-
     # Enable stakes
     owner = accounts[staker.owner()]
     owner.balance += 10**18
-    staker.setWeightedStaker(rewards, True, sender=owner)
+    staker.setWeightedStaker(gov, True, sender=owner)
     rewards.configureRecipient(ZERO_ADDRESS, sender=user)
 
-    # Deposit to rewards
-    amt = 10_000 * 10 ** 18
-    rewards.depositReward(amt, sender=fr_account)
-    week = rewards.getWeek()
-    assert amt == rewards.weeklyRewardAmount(week)
+    def stake_and_deposit_rewards(user=user, accounts=accounts, staker=staker, user2=user2, user3=user3, yprisma=yprisma, yvmkusd=yvmkusd, rewards=rewards, fee_receiver=fee_receiver):
+        # stake to staker
+        amt = 100 * 10 ** 18
+        staker.stake(amt, sender=user)
+        staker.stake(50 * 10 ** 18, sender=user2)
+        staker.stake(30 * 10 ** 18, sender=user3)
+
+        # Deposit to rewards
+        amt = 1_000 * 10 ** 18
+        rewards.depositReward(amt, sender=fr_account)
+        week = rewards.getWeek()
+    
+    yield stake_and_deposit_rewards
