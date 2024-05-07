@@ -80,10 +80,6 @@ contract SingleTokenRewardDistributor is WeekStart {
     */
     function pushRewards(uint _week) external returns (bool) {
         uint week = getWeek();
-        // The following logic prevents unrecoverable rewards by blocking deposits to weeks where we know
-        // there will be no users with a claim. This has to do with the security measure 
-        // implemented in `computeSharesAt`, blocking amounts from earning rewards in their 
-        // first week after staking.
         uint amount = pushableRewards(_week);
         if(amount == 0) return false;
         weeklyRewardAmount[_week] = 0;

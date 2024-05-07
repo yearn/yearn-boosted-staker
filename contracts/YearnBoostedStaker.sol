@@ -177,13 +177,13 @@ contract YearnBoostedStaker {
 
         uint weight = _amount >> 1;
         _amount = weight << 1;
-        acctData.realizedStake += uint112(weight);        
+        acctData.realizedStake += uint112(weight);
         weight = weight * (MAX_STAKE_GROWTH_WEEKS + 1);
 
-        // Note: The usage of `stakeAsMaxWeighted` breaks a guarantee that would otherwise allow us to derive account + global
+        // Note: The usage of `stakeAsMaxWeighted` breaks an ability to reliably derive account + global
         // amount deposited at any week using `weeklyToRealize` variables.
-        // To make up for this, we introduce the following two variables that are meant to preserve the ability for
-        // on-chain integrators to re-build it.
+        // To make up for this, we introduce the following two variables that are meant to recover that same
+        // ability for any on-chain integrators. They may combine this new data with `weeklyToRealize`.
         accountWeeklyMaxStake[_account][systemWeek] += _amount;
         globalWeeklyMaxStake[systemWeek] += _amount;
 
@@ -235,25 +235,25 @@ contract YearnBoostedStaker {
 
         // Here we do work to pull from most recent (least weighted) stake first
         uint8 bitmap = acctData.updateWeeksBitmap;
-        uint weightToRemove;
+        uint128 weightToRemove;
 
-        uint amountNeeded = _amount >> 1;
+        uint128 amountNeeded = uint128(_amount >> 1);
         _amount = amountNeeded << 1; // This helps prevent balance/weight discrepencies.
 
         if (bitmap > 0) {
-            for (uint weekIndex; weekIndex < MAX_STAKE_GROWTH_WEEKS;) {
+            for (uint128 weekIndex; weekIndex < MAX_STAKE_GROWTH_WEEKS;) {
                 // Move right to left, checking each bit if there's an update for corresponding week.
                 uint8 mask = uint8(1 << weekIndex);
                 if (bitmap & mask == mask) {
                     uint weekToCheck = systemWeek + MAX_STAKE_GROWTH_WEEKS - weekIndex;
-                    uint pending = accountWeeklyToRealize[_account][weekToCheck].weight;
+                    uint128 pending = accountWeeklyToRealize[_account][weekToCheck].weight;
                     if (amountNeeded > pending){
                         weightToRemove += pending * (weekIndex + 1);
                         accountWeeklyToRealize[_account][weekToCheck].weight = 0;
-                        globalWeeklyToRealize[weekToCheck].weight -= uint112(pending);
+                        globalWeeklyToRealize[weekToCheck].weight -= pending;
                         if (weekIndex == 0) { // Current system week
                             accountWeeklyToRealize[_account][weekToCheck].weightPersistent = 0;
-                            globalWeeklyToRealize[weekToCheck].weightPersistent -= uint112(pending);
+                            globalWeeklyToRealize[weekToCheck].weightPersistent -= pending;
                         }
                         bitmap = bitmap ^ mask;
                         amountNeeded -= pending;
@@ -261,11 +261,11 @@ contract YearnBoostedStaker {
                     else { 
                         // handle the case where we have more pending than needed
                         weightToRemove += amountNeeded * (weekIndex + 1);
-                        accountWeeklyToRealize[_account][weekToCheck].weight -= uint112(amountNeeded);
-                        globalWeeklyToRealize[weekToCheck].weight -= uint112(amountNeeded);
+                        accountWeeklyToRealize[_account][weekToCheck].weight -= amountNeeded;
+                        globalWeeklyToRealize[weekToCheck].weight -= amountNeeded;
                         if (weekIndex == 0) { // Current system week
-                            accountWeeklyToRealize[_account][weekToCheck].weightPersistent -= uint112(amountNeeded);
-                            globalWeeklyToRealize[weekToCheck].weightPersistent -= uint112(amountNeeded);
+                            accountWeeklyToRealize[_account][weekToCheck].weightPersistent -= amountNeeded;
+                            globalWeeklyToRealize[weekToCheck].weightPersistent -= amountNeeded;
                         }
                         if (amountNeeded == pending) bitmap = bitmap ^ mask;
                         amountNeeded = 0;
@@ -279,7 +279,7 @@ contract YearnBoostedStaker {
         
         uint pendingRemoved = (_amount >> 1) - amountNeeded;
         if (amountNeeded > 0) {
-            weightToRemove += amountNeeded * (1 + MAX_STAKE_GROWTH_WEEKS);
+            weightToRemove += amountNeeded * uint128(1 + MAX_STAKE_GROWTH_WEEKS);
             acctData.realizedStake -= uint112(amountNeeded);
             acctData.pendingStake = 0;
         }
