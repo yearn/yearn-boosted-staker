@@ -36,8 +36,8 @@ contract YearnBoostedStaker {
     mapping(address staker => bool approved) public approvedWeightedStaker;
 
     struct ToRealize {
-        uint112 weightPersistent;
-        uint112 weight;
+        uint128 weightPersistent;
+        uint128 weight;
     }
 
     struct AccountData {
@@ -135,13 +135,13 @@ contract YearnBoostedStaker {
 
         uint realizeWeek = systemWeek + MAX_STAKE_GROWTH_WEEKS;
         ToRealize memory toRealize = accountWeeklyToRealize[_account][realizeWeek];
-        toRealize.weight += uint112(weight);
-        toRealize.weightPersistent += uint112(weight);
+        toRealize.weight += uint128(weight);
+        toRealize.weightPersistent += uint128(weight);
         accountWeeklyToRealize[_account][realizeWeek] = toRealize;
 
         toRealize = globalWeeklyToRealize[realizeWeek];
-        toRealize.weight += uint112(weight);
-        toRealize.weightPersistent += uint112(weight);
+        toRealize.weight += uint128(weight);
+        toRealize.weightPersistent += uint128(weight);
         globalWeeklyToRealize[realizeWeek] = toRealize;
         
         accountWeeklyWeights[_account][systemWeek] = accountWeight + weight;
@@ -233,50 +233,15 @@ contract YearnBoostedStaker {
         (AccountData memory acctData, ) = _checkpointAccount(_account, systemWeek);
         _checkpointGlobal(systemWeek);
 
-        // Here we do work to pull from most recent (least weighted) stake first
-        uint8 bitmap = acctData.updateWeeksBitmap;
+        
         uint weightToRemove;
 
-        uint amountNeeded = _amount >> 1;
+        uint128 amountNeeded = uint128(_amount) >> 1;
         _amount = amountNeeded << 1; // This helps prevent balance/weight discrepencies.
-
-        if (bitmap > 0) {
-            for (uint weekIndex; weekIndex < MAX_STAKE_GROWTH_WEEKS;) {
-                // Move right to left, checking each bit if there's an update for corresponding week.
-                uint8 mask = uint8(1 << weekIndex);
-                if (bitmap & mask == mask) {
-                    uint weekToCheck = systemWeek + MAX_STAKE_GROWTH_WEEKS - weekIndex;
-                    uint pending = accountWeeklyToRealize[_account][weekToCheck].weight;
-                    if (amountNeeded > pending){
-                        weightToRemove += pending * (weekIndex + 1);
-                        accountWeeklyToRealize[_account][weekToCheck].weight = 0;
-                        globalWeeklyToRealize[weekToCheck].weight -= uint112(pending);
-                        if (weekIndex == 0) { // Current system week
-                            accountWeeklyToRealize[_account][weekToCheck].weightPersistent = 0;
-                            globalWeeklyToRealize[weekToCheck].weightPersistent -= uint112(pending);
-                        }
-                        bitmap = bitmap ^ mask;
-                        amountNeeded -= pending;
-                    }
-                    else { 
-                        // handle the case where we have more pending than needed
-                        weightToRemove += amountNeeded * (weekIndex + 1);
-                        accountWeeklyToRealize[_account][weekToCheck].weight -= uint112(amountNeeded);
-                        globalWeeklyToRealize[weekToCheck].weight -= uint112(amountNeeded);
-                        if (weekIndex == 0) { // Current system week
-                            accountWeeklyToRealize[_account][weekToCheck].weightPersistent -= uint112(amountNeeded);
-                            globalWeeklyToRealize[weekToCheck].weightPersistent -= uint112(amountNeeded);
-                        }
-                        if (amountNeeded == pending) bitmap = bitmap ^ mask;
-                        amountNeeded = 0;
-                        break;
-                    }
-                }
-                unchecked{weekIndex++;}
-            }
-            acctData.updateWeeksBitmap = bitmap;
+        if (acctData.updateWeeksBitmap > 0) {
+            (weightToRemove, acctData, amountNeeded) = _processUnrealizedStake(_account, acctData, systemWeek, amountNeeded);
         }
-        
+
         uint pendingRemoved = (_amount >> 1) - amountNeeded;
         if (amountNeeded > 0) {
             weightToRemove += amountNeeded * (1 + MAX_STAKE_GROWTH_WEEKS);
@@ -301,6 +266,59 @@ contract YearnBoostedStaker {
         stakeToken.safeTransfer(_receiver, _amount);
         
         return _amount;
+    }
+
+    function _processUnrealizedStake(
+        address _account, 
+        AccountData memory acctData, 
+        uint systemWeek, 
+        uint128 amountNeeded
+    ) internal returns (
+        uint128 weightToRemove, 
+        AccountData memory, // acctData
+        uint128             // amountNeeded
+    ) {
+        for (uint128 weekIndex; weekIndex < MAX_STAKE_GROWTH_WEEKS;) {
+            // Move right to left, checking each bit if there's an update for corresponding week.
+            uint8 mask = uint8(1 << weekIndex);
+            if (acctData.updateWeeksBitmap & mask == mask) {
+                uint weekToCheck = systemWeek + MAX_STAKE_GROWTH_WEEKS - weekIndex;
+                ToRealize memory acctToRealize = accountWeeklyToRealize[_account][weekToCheck];
+                ToRealize memory globalToRealize = globalWeeklyToRealize[weekToCheck];
+                uint128 pending = acctToRealize.weight;
+                if (amountNeeded > pending){
+                    weightToRemove += pending * (weekIndex + 1);
+                    acctToRealize.weight = 0;
+                    globalToRealize.weight -= pending;
+                    if (weekIndex == 0) { // Current system week
+                        acctToRealize.weightPersistent = 0;
+                        globalToRealize.weightPersistent -= pending;
+                    }
+                    acctData.updateWeeksBitmap = acctData.updateWeeksBitmap ^ mask;
+                    amountNeeded -= pending;
+                }
+                else { 
+                    // handle the case where we have more pending than needed
+                    weightToRemove += amountNeeded * (weekIndex + 1);
+                    acctToRealize.weight -= amountNeeded;
+                    globalToRealize.weight -= amountNeeded;
+                    if (weekIndex == 0) { // Current system week
+                        acctToRealize.weightPersistent -= amountNeeded;
+                        globalToRealize.weightPersistent -= amountNeeded;
+                    }
+                    if (amountNeeded == pending) acctData.updateWeeksBitmap = acctData.updateWeeksBitmap ^ mask;
+                    amountNeeded = 0;
+                    accountWeeklyToRealize[_account][weekToCheck] = acctToRealize;
+                    globalWeeklyToRealize[weekToCheck] = globalToRealize;
+                    break;
+                }
+                accountWeeklyToRealize[_account][weekToCheck] = acctToRealize;
+                globalWeeklyToRealize[weekToCheck] = globalToRealize;
+            }
+            unchecked{weekIndex++;}
+        }
+
+        return (weightToRemove, acctData, amountNeeded);
     }
     
     /**

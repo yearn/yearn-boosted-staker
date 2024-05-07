@@ -86,20 +86,20 @@ def test_sequenced_stake_and_unstake(user, accounts, staker, gov, user2, yprisma
         1 :
             [
                 {'type': 'stake', 'user': user, 'amount': 100 * 10 ** 18 + 1},
-                {'type': 'unstake', 'user': user2, 'amount': 20 * 10 ** 18 + 1},
+                {'type': 'stake', 'user': user2, 'amount': 20 * 10 ** 18 + 1},
             ]
         ,
         3 :
             [
                 {'type': 'stake', 'user': user, 'amount': 100 * 10 ** 18},
                 {'type': 'unstake', 'user': user, 'amount': 100 * 10 ** 18},
-                {'type': 'unstake', 'user': user2, 'amount': 60 * 10 ** 18},
+                {'type': 'stake', 'user': user2, 'amount': 60 * 10 ** 18},
             ]
         ,
         4 :
             [
                 {'type': 'stake', 'user': user, 'amount': 50 * 10 ** 18},
-                {'type': 'unstake', 'user': user2, 'amount': 75 * 10 ** 18},
+                {'type': 'unstake', 'user': user2, 'amount': 200 * 10 ** 18},
             ]
         ,
         5 :
@@ -603,7 +603,7 @@ def test_set_max_weighted_staker(staker, user, user2, rando, gov, yprisma, accou
     event = list(tx.decode_logs(staker.Staked))[0]
     weight = amount / 2
     new_weight = staker.getAccountWeight(gov)
-    instant_weight = int(amount / 2 * (MAX_STAKE_GROWTH_WEEKS + 1))
+    instant_weight = int(Decimal(amount) / Decimal(2) * Decimal(MAX_STAKE_GROWTH_WEEKS+1))
     assert event.account == gov.address
     assert event.newUserWeight == new_weight
     assert event.amount == amount
@@ -625,10 +625,10 @@ def test_set_max_weighted_staker(staker, user, user2, rando, gov, yprisma, accou
 
     balance = staker.balanceOf(gov)
     tx = staker.setWeightedStaker(user2, True, sender=gov)
-    tx = staker.stakeAsMaxWeighted(user2, amount, sender=user2)
+    tx = staker.stakeAsMaxWeighted(user2, yprisma.balanceOf(user2), sender=user2)
     chain.pending_timestamp += WEEK
     chain.mine()
-    tx = staker.unstake(balance, user2, sender=user2)
+    tx = staker.unstake(staker.balanceOf(user2), user2, sender=user2)
     
 
 def test_change_owner(staker, user, user2, rando, gov, yprisma, accounts):
