@@ -2,7 +2,6 @@
 .build/
 .cache/
 contracts/.cache
-tests/
 scripts/
 contracts/.DS_Store
 
