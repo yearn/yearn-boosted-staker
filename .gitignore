@@ -3,6 +3,7 @@
 .cache/
 contracts/.cache
 scripts/
+tests/
 contracts/.DS_Store
 
 # Python
