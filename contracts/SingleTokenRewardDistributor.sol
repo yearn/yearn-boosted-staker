@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: GNU AGPLv3
 pragma solidity ^0.8.22;
 
-import "utils/WeekStart.sol";
-import {IYearnBoostedStaker} from "interfaces/IYearnBoostedStaker.sol";
+import {WeekStart, IYearnBoostedStaker} from "utils/WeekStart.sol";
 import {IERC20, SafeERC20} from "@openzeppelin/contracts@v4.9.3/token/ERC20/utils/SafeERC20.sol";
 
 
@@ -175,9 +174,9 @@ contract SingleTokenRewardDistributor is WeekStart {
         
         _claimEndWeek += 1;
         info.lastClaimWeek = uint96(_claimEndWeek);
-        address recipient = info.recipient == address(0) ? _account : info.recipient;
         
         if (amountClaimed > 0) {
+            address recipient = info.recipient == address(0) ? _account : info.recipient;
             rewardToken.safeTransfer(recipient, amountClaimed);
             emit RewardsClaimed(_account, _claimEndWeek, amountClaimed);
         }

@@ -409,14 +409,14 @@ contract YearnBoostedStaker {
         if (_week > getWeek()) return 0;
         
         AccountData memory acctData = accountData[_account];
-
-        uint pending = uint(acctData.pendingStake);
         
         uint16 lastUpdateWeek = acctData.lastUpdateWeek;
 
         if (lastUpdateWeek >= _week) return accountWeeklyWeights[_account][_week]; 
 
         uint weight = accountWeeklyWeights[_account][lastUpdateWeek];
+
+        uint pending = uint(acctData.pendingStake);
         if (pending == 0) return weight;
 
         uint8 bitmap = acctData.updateWeeksBitmap;
