@@ -166,7 +166,7 @@ contract YBSUtilities {
     }
 
     function _minBoost() internal pure returns (uint) {
-        return PRECISION / 2;
+        return PRECISION; // 1x is the min
     }
 
     function _maxBoost() internal view returns (uint) {
@@ -193,7 +193,6 @@ contract YBSUtilities {
 
     function projectedRewardAmount() public view returns (uint) {
         uint week = getWeek();
-        if(week == 0) return 0;
         return weeklyRewardAmountAt(week);
     }
 
