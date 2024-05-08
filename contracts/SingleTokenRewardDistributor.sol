@@ -125,7 +125,7 @@ contract SingleTokenRewardDistributor is WeekStart {
     /**
         @notice Claim rewards within a range of specified past weeks.
         @param _claimStartWeek the min week to search and rewards.
-        @param _claimEndWeek the max week in which to search for an claim rewards.
+        @param _claimEndWeek the max week in which to search for and claim rewards.
         @dev    IMPORTANT: Choosing a `_claimStartWeek` that is greater than the earliest week in which a user
                 may claim. Will result in the user being locked out (total loss) of rewards for any weeks prior.
     */
@@ -140,7 +140,7 @@ contract SingleTokenRewardDistributor is WeekStart {
         @notice Claim on behalf of another account for a range of specified past weeks.
         @param _account Account of which to make the claim on behalf of.
         @param _claimStartWeek The min week to search and rewards.
-        @param _claimEndWeek The max week in which to search for an claim rewards.
+        @param _claimEndWeek The max week in which to search for and claim rewards.
         @dev    WARNING: Choosing a `_claimStartWeek` that is greater than the earliest week in which a user
                 may claim will result in the user being locked out (total loss) of rewards for any weeks prior.
         @dev    Useful to target specific weeks with known reward amounts. Claiming via this function will tend 
@@ -183,7 +183,7 @@ contract SingleTokenRewardDistributor is WeekStart {
     }
 
     /**
-        @notice Helper function used to determine overal share of rewards at a particular week.
+        @notice Helper function used to determine overall share of rewards at a particular week.
         @dev    IMPORTANT: This calculation cannot be relied upon to return strictly the users weight
                 against global weight as it implements custom logic to ignore the first week of each deposit.
         @dev    Computing shares in past weeks is accurate. However, current week computations will not 
@@ -235,7 +235,7 @@ contract SingleTokenRewardDistributor is WeekStart {
         uint _claimEndWeek
     ) external view returns (uint claimable) {
         uint currentWeek = getWeek();
-        if (_claimEndWeek > currentWeek) _claimEndWeek = currentWeek;
+        if (_claimEndWeek >= currentWeek) _claimEndWeek = currentWeek - 1;
         return _getTotalClaimableByRange(_account, _claimStartWeek, _claimEndWeek);
     }
 
@@ -245,7 +245,7 @@ contract SingleTokenRewardDistributor is WeekStart {
         uint _claimEndWeek
     ) internal view returns (uint claimableAmount) {
         for (uint i = _claimStartWeek; i <= _claimEndWeek; ++i) {
-            claimableAmount += getClaimableAt(_account, i);
+            claimableAmount += _getClaimableAt(_account, i);
         }
     }
 
@@ -264,7 +264,7 @@ contract SingleTokenRewardDistributor is WeekStart {
 
         // Loop from old towards recent.
         for (claimStartWeek; claimStartWeek <= currentWeek; claimStartWeek++) {
-            if (getClaimableAt(_account, claimStartWeek) > 0) {
+            if (_getClaimableAt(_account, claimStartWeek) > 0) {
                 canClaim = true;
                 break;
             }
@@ -274,7 +274,7 @@ contract SingleTokenRewardDistributor is WeekStart {
 
         // Loop backwards from recent week towards old. Skip current week.
         for (claimEndWeek = currentWeek - 1; claimEndWeek > claimStartWeek; claimEndWeek--) {
-            if (getClaimableAt(_account, claimEndWeek) > 0) {
+            if (_getClaimableAt(_account, claimEndWeek) > 0) {
                 break;
             }
         }
@@ -290,8 +290,20 @@ contract SingleTokenRewardDistributor is WeekStart {
     function getClaimableAt(
         address _account, 
         uint _week
-    ) public view returns (uint rewardAmount) {
+    ) external view returns (uint rewardAmount) {
         if(_week >= getWeek()) return 0;
+        return _getClaimableAt(_account, _week);
+    }
+
+    /**
+        @notice Get the reward amount available at a given week index.
+        @param _account The account to check.
+        @param _week The past week to check.
+    */
+    function _getClaimableAt(
+        address _account, 
+        uint _week
+    ) internal view returns (uint rewardAmount) {
         if(_week < accountInfo[_account].lastClaimWeek) return 0;
         uint rewardShare = computeSharesAt(_account, _week);
         uint totalWeeklyAmount = weeklyRewardAmount[_week];

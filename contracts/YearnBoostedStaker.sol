@@ -529,7 +529,7 @@ contract YearnBoostedStaker {
     }
 
     /**
-        @notice Allow another address to staje or unstake on behalf of. Useful for zaps and other functionality.
+        @notice Allow another address to stake or unstake on behalf of. Useful for zaps and other functionality.
         @param _caller Address of the caller to approve or unapprove.
         @param _status Enum representing various approval status states.
     */
