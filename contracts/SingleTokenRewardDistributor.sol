@@ -295,11 +295,6 @@ contract SingleTokenRewardDistributor is WeekStart {
         return _getClaimableAt(_account, _week);
     }
 
-    /**
-        @notice Get the reward amount available at a given week index.
-        @param _account The account to check.
-        @param _week The past week to check.
-    */
     function _getClaimableAt(
         address _account, 
         uint _week
