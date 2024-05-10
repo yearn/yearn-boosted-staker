@@ -25,30 +25,100 @@ contract YBSUtilities {
         MAX_STAKE_GROWTH_WEEKS = YBS.MAX_STAKE_GROWTH_WEEKS();
     }
 
-    function getUserBoostMultiplier(address _user) external view returns (uint) {
-        uint balance = YBS.balanceOf(_user);
+    // Boost multiplier based on last week's finalization
+    function getUserActiveBoostMultiplier(address _user) external view returns (uint) {
+        uint currentWeek = getWeek();
+        // Ignore current week stake
+        uint balance = YBS.balanceOf(_user) - getAccountStakeAmountAt(_user, currentWeek);
         if (balance == 0) return 0;
-        uint weight = YBS.getAccountWeight(_user);
+        // Ignore last week weight ()
+        uint weight = adjustedAccountWeightAt(_user, currentWeek - 1);
         if (weight == 0) return 0;
         return weight * PRECISION / balance;
     }
 
-    function getGlobalAverageBoostMultiplier() public view returns (uint) {
+    // Boost multiplier if week were to end today
+    function getUserProjectedBoostMultiplier(address _user) external view returns (uint) {
+        uint currentWeek = getWeek();
+        uint balance = YBS.balanceOf(_user);
+        if (balance == 0) return 0;
+        uint weight = adjustedAccountWeightAt(_user, currentWeek);
+        if (weight == 0) return 0;
+        return weight * PRECISION / balance;
+    }
+
+    function getUserActiveApr(address _account, uint _stakeTokenPrice, uint _rewardTokenPrice) external view returns (uint) {
+        if (_stakeTokenPrice == 0 || _rewardTokenPrice == 0) return 0;
+        uint currentWeek = getWeek();
+        if(currentWeek == 0) return 0;
+        uint rewardsAmount = activeRewardAmount();
+        if (rewardsAmount == 0) return 0;
+        uint userShare = REWARDS_DISTRIBUTOR.computeSharesAt(_account, currentWeek - 1);
+        if (userShare == 0) return 0;
+        uint userRewards = userShare * rewardsAmount;
+        if (userRewards == 0) return 0;
+        uint userStakedBalance = YBS.balanceOf(_account) - getAccountStakeAmountAt(_account, currentWeek);
+        if (userStakedBalance == 0) return 0;
+        return (_rewardTokenPrice * userRewards) * WEEKS_PER_YEAR / (userStakedBalance * _stakeTokenPrice);
+    }
+
+    function getUserProjectedApr(address _account, uint _stakeTokenPrice, uint _rewardTokenPrice) public view returns (uint) {
+        if (_stakeTokenPrice == 0 || _rewardTokenPrice == 0) return 0;
+        uint currentWeek = getWeek();
+        if(currentWeek == 0) return 0;
+        uint rewardsAmount = projectedRewardAmount();
+        if (rewardsAmount == 0) return 0;
+        uint userShare = REWARDS_DISTRIBUTOR.computeSharesAt(_account, currentWeek);
+        if (userShare == 0) return 0;
+        uint userRewards = userShare * rewardsAmount;
+        if (userRewards == 0) return 0;
+        uint userStakedBalance = YBS.balanceOf(_account);
+        if (userStakedBalance == 0) return 0;
+        return (_rewardTokenPrice * userRewards) * WEEKS_PER_YEAR / (userStakedBalance * _stakeTokenPrice);
+    }
+
+    function getGlobalActiveBoostMultiplier() public view returns (uint) {
+        uint currentWeek = getWeek();
+        uint supply = YBS.totalSupply() - getGlobalStakeAmountAt(currentWeek);
+        if (supply == 0) return 0;
+        uint weight = adjustedGlobalWeightAt(currentWeek - 1);
+        if (weight == 0) return 0;
+        return weight * PRECISION / supply;
+    }
+
+    function getGlobalProjectedBoostMultiplier() public view returns (uint) {
+        uint currentWeek = getWeek();
         uint supply = YBS.totalSupply();
         if (supply == 0) return 0;
-        uint weight = YBS.getGlobalWeight();
+        uint weight = adjustedGlobalWeightAt(currentWeek);
         if (weight == 0) return 0;
         return weight * PRECISION / supply;
     }
     
 
-    // Can only get for current week. pr
-    function getGlobalAverageApr(uint _stakeTokenPrice, uint _rewardTokenPrice) public view returns (uint) {
+    function getGlobalActiveApr(uint _stakeTokenPrice, uint _rewardTokenPrice) public view returns (uint) {
+        if (getGlobalActiveBoostMultiplier() == 0) return 0;
         if (_stakeTokenPrice == 0 || _rewardTokenPrice == 0) return 0;
-        uint week = getWeek();
-        if(week == 0) return 0;
-        week -= 1;
-        uint rewardsAmount = weeklyRewardAmountAt(week);
+        uint currentWeek = getWeek();
+        if(currentWeek == 0) return 0;
+        uint rewardsAmount = activeRewardAmount();
+        if (rewardsAmount == 0) return 0;
+        // Get total supply, but reduce by amount that has been staked in current week
+        uint supply = YBS.totalSupply() - getGlobalStakeAmountAt(currentWeek);
+        if (supply == 0) return 0;
+        return (
+            rewardsAmount * 
+            _rewardTokenPrice *
+            PRECISION /
+            (supply * _stakeTokenPrice)
+            * WEEKS_PER_YEAR
+        );
+    }
+
+    function getGlobalProjectedApr(uint _stakeTokenPrice, uint _rewardTokenPrice) public view returns (uint) {
+        if (_stakeTokenPrice == 0 || _rewardTokenPrice == 0) return 0;
+        uint currentWeek = getWeek();
+        uint rewardsAmount = projectedRewardAmount();
         if (rewardsAmount == 0) return 0;
         uint supply = YBS.totalSupply();
         if (supply == 0) return 0;
@@ -61,50 +131,68 @@ contract YBSUtilities {
         );
     }
 
-    function getGlobalMinMaxApr(uint _stakeTokenPrice, uint _rewardTokenPrice) external view returns (uint min, uint max) {
-        uint avgApr = getGlobalAverageApr(_stakeTokenPrice, _rewardTokenPrice);
+    function getGlobalMinMaxActiveApr(uint _stakeTokenPrice, uint _rewardTokenPrice) external view returns (uint min, uint max) {
+        return getGlobalMinMaxApr(true, _stakeTokenPrice, _rewardTokenPrice);
+    }
+    function getGlobalMinMaxProjectedApr(uint _stakeTokenPrice, uint _rewardTokenPrice) external view returns (uint min, uint max) {
+        return getGlobalMinMaxApr(false, _stakeTokenPrice, _rewardTokenPrice);
+    }
+
+    function getGlobalMinMaxApr(bool _active, uint _stakeTokenPrice, uint _rewardTokenPrice) internal view returns (uint min, uint max) {
+        uint avgApr = _active ? 
+            getGlobalActiveApr(_stakeTokenPrice, _rewardTokenPrice) :
+            getGlobalProjectedApr(_stakeTokenPrice, _rewardTokenPrice);
+
         if(avgApr == 0) return (0, 0);
-        uint avgBoost = getGlobalAverageBoostMultiplier();
+
+        uint avgBoost = _active ?
+            getGlobalActiveBoostMultiplier() :
+            getGlobalProjectedBoostMultiplier();
+
         if(avgBoost == 0) return (0, 0);
         uint minApr = avgApr * _minBoost() / avgBoost;
         uint maxApr = avgApr * _maxBoost() / avgBoost;
         return (minApr, maxApr);
     }
 
+    function getAccountStakeAmountAt(address _account, uint _week) public view returns (uint) {
+        uint regularStake = 2 * YBS.accountWeeklyToRealize(_account, _week + MAX_STAKE_GROWTH_WEEKS).weightPersistent;
+        return regularStake + YBS.accountWeeklyMaxStake(_account, _week);
+    }
+
+    function getGlobalStakeAmountAt(uint _week) public view returns (uint) {
+        uint regularStake = 2 *  YBS.globalWeeklyToRealize(_week + MAX_STAKE_GROWTH_WEEKS).weightPersistent;
+        return regularStake + YBS.globalWeeklyMaxStake(_week);
+    }
+
     function _minBoost() internal pure returns (uint) {
-        return PRECISION / 2;
+        return PRECISION; // 1x is the min
     }
 
     function _maxBoost() internal view returns (uint) {
         return _minBoost() * (MAX_STAKE_GROWTH_WEEKS + 1);
     }
 
-    
-    function getUserApr(address _account, uint _stakeTokenPrice, uint _rewardTokenPrice) external view returns (uint) {
-        if (_stakeTokenPrice == 0 || _rewardTokenPrice == 0) return 0;
-        uint week = getWeek();
-        if(week == 0) return 0;
-        week -= 1;
-        return getUserAprAt(_account, week, _stakeTokenPrice, _rewardTokenPrice);
+    function adjustedAccountWeightAt(address _account, uint _week) public view returns (uint) {
+        uint acctWeight = YBS.getAccountWeightAt(_account, _week);
+        if (acctWeight == 0) return 0;
+        return acctWeight - YBS.accountWeeklyToRealize(_account, _week + MAX_STAKE_GROWTH_WEEKS).weightPersistent;
     }
 
-    // Pass in week from last week to find active apr
-    function getUserAprAt(address _account, uint _week, uint _stakeTokenPrice, uint _rewardTokenPrice) public view returns (uint) {
-        uint rewardsAmount = weeklyRewardAmountAt(_week);
-        if (rewardsAmount == 0) return 0;
-        uint userShare = REWARDS_DISTRIBUTOR.computeSharesAt(_account, _week);
-        if (userShare == 0) return 0;
-        uint userRewards = userShare * rewardsAmount;
-        if (userRewards == 0) return 0;
-        uint userStakedBalance = YBS.balanceOf(_account);
-        if (userStakedBalance == 0) return 0;
-        return (_rewardTokenPrice * userRewards) * WEEKS_PER_YEAR / (userStakedBalance * _stakeTokenPrice);
+    function adjustedGlobalWeightAt(uint _week) public view returns (uint) {
+        uint globalWeight = YBS.getGlobalWeightAt(_week);
+        if (globalWeight == 0) return 0;
+        return globalWeight - YBS.globalWeeklyToRealize(_week + MAX_STAKE_GROWTH_WEEKS).weightPersistent;
     }
     
-    function weeklyRewardAmount() external view returns (uint) {
+    function activeRewardAmount() public view returns (uint) {
         uint week = getWeek();
         if(week == 0) return 0;
-        week -= 1;
+        return weeklyRewardAmountAt(week - 1);
+    }
+
+    function projectedRewardAmount() public view returns (uint) {
+        uint week = getWeek();
         return weeklyRewardAmountAt(week);
     }
 

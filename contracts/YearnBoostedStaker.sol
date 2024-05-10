@@ -15,13 +15,15 @@ contract YearnBoostedStaker {
     // Account weight tracking state vars.
     mapping(address account => AccountData data) public accountData;
     mapping(address account => mapping(uint week => uint weight)) private accountWeeklyWeights;
-    mapping(address account => mapping(uint week => uint amount)) public accountWeeklyToRealize;
+    mapping(address account => mapping(uint week => ToRealize weight)) public accountWeeklyToRealize;
+    mapping(address account => mapping(uint week => uint amount)) public accountWeeklyMaxStake;
 
     // Global weight tracking stats vars.
     uint112 public globalGrowthRate;
     uint16 public globalLastUpdateWeek;
     mapping(uint week => uint weight) private globalWeeklyWeights;
-    mapping(uint week => uint weightToRealize) public globalWeeklyToRealize;
+    mapping(uint week => ToRealize weight) public globalWeeklyToRealize;
+    mapping(uint week => uint amount) public globalWeeklyMaxStake;
 
     // Generic token interface.
     uint public totalSupply;
@@ -32,6 +34,11 @@ contract YearnBoostedStaker {
     address public pendingOwner;
     mapping(address account => mapping(address caller => ApprovalStatus approvalStatus)) public approvedCaller;
     mapping(address staker => bool approved) public approvedWeightedStaker;
+
+    struct ToRealize {
+        uint128 weightPersistent;
+        uint128 weight;
+    }
 
     struct AccountData {
         uint112 realizedStake;  // Amount of stake that has fully realized weight.
@@ -59,8 +66,8 @@ contract YearnBoostedStaker {
     event Staked(address indexed account, uint indexed week, uint amount, uint newUserWeight, uint weightAdded);
     event Unstaked(address indexed account, uint indexed week, uint amount, uint newUserWeight, uint weightRemoved);
     event ApprovedCallerSet(address indexed account, address indexed caller, ApprovalStatus status);
-    event WeightedStakerSet(address indexed staker, bool approved);
     event OwnershipTransferred(address indexed newOwner);
+    event WeightedStakerSet(address indexed staker, bool approved);
 
     /**
         @param _token The token to be staked.
@@ -127,13 +134,19 @@ contract YearnBoostedStaker {
         globalGrowthRate += uint112(weight);
 
         uint realizeWeek = systemWeek + MAX_STAKE_GROWTH_WEEKS;
-        uint previous = accountWeeklyToRealize[_account][realizeWeek];
+        ToRealize memory toRealize = accountWeeklyToRealize[_account][realizeWeek];
+        toRealize.weight += uint128(weight);
+        toRealize.weightPersistent += uint128(weight);
+        accountWeeklyToRealize[_account][realizeWeek] = toRealize;
 
-        // modify weekly realizations and bitmap
-        accountWeeklyToRealize[_account][realizeWeek] = previous + weight;
+        toRealize = globalWeeklyToRealize[realizeWeek];
+        toRealize.weight += uint128(weight);
+        toRealize.weightPersistent += uint128(weight);
+        globalWeeklyToRealize[realizeWeek] = toRealize;
+        
         accountWeeklyWeights[_account][systemWeek] = accountWeight + weight;
-        globalWeeklyToRealize[realizeWeek] += weight;
         globalWeeklyWeights[systemWeek] = globalWeight + weight;
+
         acctData.updateWeeksBitmap |= 1; // Use bitwise or to ensure bit is flipped at least weighted position.
         accountData[_account] = acctData;
         totalSupply += _amount;
@@ -148,15 +161,13 @@ contract YearnBoostedStaker {
         @notice Allows an option for an approved helper to stake to any account at any weight week.
         @dev A stake using this method only effects weight in current and future weeks. It does not backfill prior weeks.
         @param _amount Amount to stake
-        @param _idx Index of the week to stake to relative to current week. E.g. 0 = current week, 4 = current plus 4 growth weeks.
         @return amount of tokens staked
     */
-    function stakeAsWeighted(address _account, uint _amount, uint _idx) external returns (uint) {
+    function stakeAsMaxWeighted(address _account, uint _amount) external returns (uint) {
         require(
             approvedWeightedStaker[msg.sender],
             "!approvedStaker"
         );
-        require(_idx <= MAX_STAKE_GROWTH_WEEKS, "Invalid week index.");
         require(_amount > 1 && _amount < type(uint112).max, "invalid amount");
 
         // Before going further, let's sync our account and global weights
@@ -166,32 +177,26 @@ contract YearnBoostedStaker {
 
         uint weight = _amount >> 1;
         _amount = weight << 1;
-        uint instantWeight = weight * (_idx + 1);
+        acctData.realizedStake += uint112(weight);
+        weight = weight * (MAX_STAKE_GROWTH_WEEKS + 1);
 
-        accountWeeklyWeights[_account][systemWeek] = accountWeight + instantWeight;
-        globalWeeklyWeights[systemWeek] = globalWeight + instantWeight;
-        
-        if (_idx == MAX_STAKE_GROWTH_WEEKS) {
-            acctData.realizedStake += uint112(weight);            
-        }
-        else {
-            acctData.pendingStake += uint112(weight);
-            globalGrowthRate += uint112(weight);
-            uint realizeWeek = systemWeek + (MAX_STAKE_GROWTH_WEEKS - _idx);
-            uint previous = accountWeeklyToRealize[_account][realizeWeek];
-            accountWeeklyToRealize[_account][realizeWeek] = previous + weight;
-            globalWeeklyToRealize[realizeWeek] += weight;
+        // Note: The usage of `stakeAsMaxWeighted` breaks an ability to reliably derive account + global
+        // amount deposited at any week using `weeklyToRealize` variables.
+        // To make up for this, we introduce the following two variables that are meant to recover that same
+        // ability for any on-chain integrators. They may combine this new data with `weeklyToRealize`.
+        accountWeeklyMaxStake[_account][systemWeek] += _amount;
+        globalWeeklyMaxStake[systemWeek] += _amount;
 
-            uint8 mask = uint8(1 << _idx);
-            // Use bitwise or to ensure bit is flpped at target position.
-            acctData.updateWeeksBitmap |= mask;
-        }
+        accountWeeklyWeights[_account][systemWeek] = accountWeight + weight;
+        globalWeeklyWeights[systemWeek] = globalWeight + weight;
+
         
+
         accountData[_account] = acctData;
         totalSupply += _amount;
 
         stakeToken.safeTransferFrom(msg.sender, address(this), uint(_amount));
-        emit Staked(_account, systemWeek, _amount, accountWeight + instantWeight, instantWeight);
+        emit Staked(_account, systemWeek, _amount, accountWeight + weight, weight);
 
         return _amount;
     }
@@ -230,31 +235,38 @@ contract YearnBoostedStaker {
 
         // Here we do work to pull from most recent (least weighted) stake first
         uint8 bitmap = acctData.updateWeeksBitmap;
-        uint weightToRemove;
+        uint128 weightToRemove;
 
-        uint amountNeeded = _amount >> 1;
+        uint128 amountNeeded = uint128(_amount >> 1);
         _amount = amountNeeded << 1; // This helps prevent balance/weight discrepencies.
 
         if (bitmap > 0) {
-            for (uint weekIndex; weekIndex < MAX_STAKE_GROWTH_WEEKS;) {
+            for (uint128 weekIndex; weekIndex < MAX_STAKE_GROWTH_WEEKS;) {
                 // Move right to left, checking each bit if there's an update for corresponding week.
                 uint8 mask = uint8(1 << weekIndex);
                 if (bitmap & mask == mask) {
                     uint weekToCheck = systemWeek + MAX_STAKE_GROWTH_WEEKS - weekIndex;
-                    uint pending = accountWeeklyToRealize[_account][weekToCheck];
-                    
+                    uint128 pending = accountWeeklyToRealize[_account][weekToCheck].weight;
                     if (amountNeeded > pending){
                         weightToRemove += pending * (weekIndex + 1);
-                        accountWeeklyToRealize[_account][weekToCheck] = 0;
-                        globalWeeklyToRealize[weekToCheck] -= pending;
+                        accountWeeklyToRealize[_account][weekToCheck].weight = 0;
+                        globalWeeklyToRealize[weekToCheck].weight -= pending;
+                        if (weekIndex == 0) { // Current system week
+                            accountWeeklyToRealize[_account][weekToCheck].weightPersistent = 0;
+                            globalWeeklyToRealize[weekToCheck].weightPersistent -= pending;
+                        }
                         bitmap = bitmap ^ mask;
                         amountNeeded -= pending;
                     }
                     else { 
                         // handle the case where we have more pending than needed
                         weightToRemove += amountNeeded * (weekIndex + 1);
-                        accountWeeklyToRealize[_account][weekToCheck] -= amountNeeded;
-                        globalWeeklyToRealize[weekToCheck] -= amountNeeded;
+                        accountWeeklyToRealize[_account][weekToCheck].weight -= amountNeeded;
+                        globalWeeklyToRealize[weekToCheck].weight -= amountNeeded;
+                        if (weekIndex == 0) { // Current system week
+                            accountWeeklyToRealize[_account][weekToCheck].weightPersistent -= amountNeeded;
+                            globalWeeklyToRealize[weekToCheck].weightPersistent -= amountNeeded;
+                        }
                         if (amountNeeded == pending) bitmap = bitmap ^ mask;
                         amountNeeded = 0;
                         break;
@@ -267,7 +279,7 @@ contract YearnBoostedStaker {
         
         uint pendingRemoved = (_amount >> 1) - amountNeeded;
         if (amountNeeded > 0) {
-            weightToRemove += amountNeeded * (1 + MAX_STAKE_GROWTH_WEEKS);
+            weightToRemove += amountNeeded * uint128(1 + MAX_STAKE_GROWTH_WEEKS);
             acctData.realizedStake -= uint112(amountNeeded);
             acctData.pendingStake = 0;
         }
@@ -361,7 +373,7 @@ contract YearnBoostedStaker {
             bitmap = bitmap << 1;
             if (bitmap & MAX_WEEK_BIT == MAX_WEEK_BIT){ // If left-most bit is true, we have something to realize; push pending to realized.
                 // Do any updates needed to realize an amount for an account.
-                uint toRealize = accountWeeklyToRealize[_account][lastUpdateWeek];
+                uint toRealize = accountWeeklyToRealize[_account][lastUpdateWeek].weight;
                 pending -= toRealize;
                 realized += toRealize;
                 if (pending == 0) break; // All pending has been realized. No need to continue.
@@ -397,14 +409,14 @@ contract YearnBoostedStaker {
         if (_week > getWeek()) return 0;
         
         AccountData memory acctData = accountData[_account];
-
-        uint pending = uint(acctData.pendingStake);
         
         uint16 lastUpdateWeek = acctData.lastUpdateWeek;
 
         if (lastUpdateWeek >= _week) return accountWeeklyWeights[_account][_week]; 
 
         uint weight = accountWeeklyWeights[_account][lastUpdateWeek];
+
+        uint pending = uint(acctData.pendingStake);
         if (pending == 0) return weight;
 
         uint8 bitmap = acctData.updateWeeksBitmap;
@@ -416,7 +428,7 @@ contract YearnBoostedStaker {
             // Our bitmap is used to determine if week has any amount to realize.
             bitmap = bitmap << 1;
             if (bitmap & MAX_WEEK_BIT == MAX_WEEK_BIT){ // If left-most bit is true, we have something to realize; push pending to realized.
-                pending -= accountWeeklyToRealize[_account][lastUpdateWeek];
+                pending -= accountWeeklyToRealize[_account][lastUpdateWeek].weight;
                 if (pending == 0) break; // All pending has now been realized, let's exit.
             }            
         }
@@ -461,7 +473,7 @@ contract YearnBoostedStaker {
             unchecked{lastUpdateWeek++;}
             weight += rate;
             globalWeeklyWeights[lastUpdateWeek] = weight;
-            rate -= globalWeeklyToRealize[lastUpdateWeek];
+            rate -= globalWeeklyToRealize[lastUpdateWeek].weight;
         }
 
         globalGrowthRate = uint112(rate);
@@ -500,38 +512,10 @@ contract YearnBoostedStaker {
         while (lastUpdateWeek < week) {
             unchecked {lastUpdateWeek++;}
             weight += rate;
-            rate -= globalWeeklyToRealize[lastUpdateWeek];
+            rate -= globalWeeklyToRealize[lastUpdateWeek].weight;
         }
 
         return weight;
-    }
-
-    /**
-        @notice Returns the ratio of an account's weight to global weight at current week.
-        @param _account Account to query.
-        @return ratio of account weight to gloabl weight in terms of 1e18.
-    */
-    function getAccountWeightRatio(address _account) external view returns (uint) {
-        return _getAccountWeightRatioAt(_account, getWeek());
-    }
-
-    /**
-        @notice Returns the ratio of an account's weight to global weight at specified week.
-        @param _account Account to query.
-        @param _week Week to query.
-        @return ratio of account weight to gloabl weight in terms of 1e18.
-    */
-    function getAccountWeightRatioAt(address _account, uint _week) public view returns (uint) {
-        if (_week > getWeek()) return 0;
-        return _getAccountWeightRatioAt(_account, getWeek());
-    }
-
-    function _getAccountWeightRatioAt(address _account, uint _week) internal view returns (uint) {
-        uint acctWeight = getAccountWeightAt(_account, _week);
-        if (acctWeight == 0) return 0; // User has no weight.
-        uint globalWeight = getGlobalWeightAt(_week);
-        if (globalWeight == 0) return 0;
-        return acctWeight * 1e18 / globalWeight;
     }
 
     /**
@@ -545,7 +529,7 @@ contract YearnBoostedStaker {
     }
 
     /**
-        @notice Allow another address to staje or unstake on behalf of. Useful for zaps and other functionality.
+        @notice Allow another address to stake or unstake on behalf of. Useful for zaps and other functionality.
         @param _caller Address of the caller to approve or unapprove.
         @param _status Enum representing various approval status states.
     */

@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: GNU AGPLv3
 pragma solidity ^0.8.22;
 
-import "interfaces/IYearnBoostedStaker.sol";
-import "utils/WeekStart.sol";
+import {WeekStart, IYearnBoostedStaker} from "utils/WeekStart.sol";
 import {IERC20, SafeERC20} from "@openzeppelin/contracts@v4.9.3/token/ERC20/utils/SafeERC20.sol";
 
 
@@ -13,6 +12,7 @@ contract SingleTokenRewardDistributor is WeekStart {
     IYearnBoostedStaker public immutable staker;
     IERC20 public immutable rewardToken;
     uint public immutable START_WEEK;
+    uint immutable MAX_STAKE_GROWTH_WEEKS;
 
     struct AccountInfo {
         address recipient; // Who rewards will be sent to. Cheaper to store here than in dedicated mapping.
@@ -27,6 +27,7 @@ contract SingleTokenRewardDistributor is WeekStart {
     event RewardsClaimed(address indexed account, uint indexed week, uint rewardAmount);
     event RecipientConfigured(address indexed account, address indexed recipient);
     event ClaimerApproved(address indexed account, address indexed, bool approved);
+    event RewardPushed(uint indexed fromWeek, uint indexed toWeek, uint amount);
 
     /**
         @param _staker the staking contract to use for weight calculations.
@@ -40,6 +41,7 @@ contract SingleTokenRewardDistributor is WeekStart {
         staker = _staker;
         rewardToken = _rewardToken;
         START_WEEK = staker.getWeek();
+        MAX_STAKE_GROWTH_WEEKS = staker.MAX_STAKE_GROWTH_WEEKS();
     }
 
     /**
@@ -60,13 +62,41 @@ contract SingleTokenRewardDistributor is WeekStart {
     }
 
     function _depositReward(address _target, uint _amount) internal {
-        uint week = getWeek();
-
         if (_amount > 0) {
+            uint week = getWeek();
             weeklyRewardAmount[week] += _amount;
             rewardToken.safeTransferFrom(_target, address(this), _amount);
             emit RewardDeposited(week, _target, _amount);
         }
+    }
+
+    /**
+        @notice Push inaccessible rewards to current week.
+        @dev    In rare circumstances, rewards may have been deposited to a week where no adjusted weight exists.
+                This function allows us to recover rewards to the current week.
+        @param _week the week to push rewards from.
+        @return true if operation was successful.
+    */
+    function pushRewards(uint _week) external returns (bool) {
+        uint week = getWeek();
+        uint amount = pushableRewards(_week);
+        if(amount == 0) return false;
+        weeklyRewardAmount[_week] = 0;
+        weeklyRewardAmount[week] += amount;
+        emit RewardPushed(_week, week, amount);
+        return true;
+    }
+
+    /**
+        @notice Helper view function to check if any rewards are pushable.
+        @param _week the week to push rewards from.
+        @return uint representing rewards amount that is pushable.
+    */
+    function pushableRewards(uint _week) public view returns (uint) {
+        uint week = getWeek();
+        if(_week >= week) return 0;
+        if(adjustedGlobalWeightAt(_week) != 0) return 0;
+        return weeklyRewardAmount[_week];
     }
 
     /**
@@ -95,7 +125,7 @@ contract SingleTokenRewardDistributor is WeekStart {
     /**
         @notice Claim rewards within a range of specified past weeks.
         @param _claimStartWeek the min week to search and rewards.
-        @param _claimEndWeek the max week in which to search for an claim rewards.
+        @param _claimEndWeek the max week in which to search for and claim rewards.
         @dev    IMPORTANT: Choosing a `_claimStartWeek` that is greater than the earliest week in which a user
                 may claim. Will result in the user being locked out (total loss) of rewards for any weeks prior.
     */
@@ -110,7 +140,7 @@ contract SingleTokenRewardDistributor is WeekStart {
         @notice Claim on behalf of another account for a range of specified past weeks.
         @param _account Account of which to make the claim on behalf of.
         @param _claimStartWeek The min week to search and rewards.
-        @param _claimEndWeek The max week in which to search for an claim rewards.
+        @param _claimEndWeek The max week in which to search for and claim rewards.
         @dev    WARNING: Choosing a `_claimStartWeek` that is greater than the earliest week in which a user
                 may claim will result in the user being locked out (total loss) of rewards for any weeks prior.
         @dev    Useful to target specific weeks with known reward amounts. Claiming via this function will tend 
@@ -144,26 +174,45 @@ contract SingleTokenRewardDistributor is WeekStart {
         
         _claimEndWeek += 1;
         info.lastClaimWeek = uint96(_claimEndWeek);
-        address recipient = info.recipient == address(0) ? _account : info.recipient;
         
         if (amountClaimed > 0) {
+            address recipient = info.recipient == address(0) ? _account : info.recipient;
             rewardToken.safeTransfer(recipient, amountClaimed);
             emit RewardsClaimed(_account, _claimEndWeek, amountClaimed);
         }
     }
 
     /**
-        @notice Helper function used to determine overal share of rewards at a particular week.
-        @dev    Computing shares in past weeks is accurate. However, current week computations will not accurate 
-                as week the is not yet finalized.
+        @notice Helper function used to determine overall share of rewards at a particular week.
+        @dev    IMPORTANT: This calculation cannot be relied upon to return strictly the users weight
+                against global weight as it implements custom logic to ignore the first week of each deposit.
+        @dev    Computing shares in past weeks is accurate. However, current week computations will not 
+                be accurate until week is finalized.
         @dev    Results scaled to PRECSION.
     */
-    function computeSharesAt(address _account, uint _week) public view returns (uint rewardShare) {
+    function computeSharesAt(address _account, uint _week) public view returns (uint) {
         require(_week <= getWeek(), "Invalid week");
+        // As a security measure, we don't distribute rewards to YBS deposits on their first full week of staking.
+        // To acheive this, we lookup the weight that was added in the target week and ignore it.
+        uint adjAcctWeight = adjustedAccountWeightAt(_account, _week);
+        if (adjAcctWeight == 0) return 0;
+        
+        uint adjGlobalWeight = adjustedGlobalWeightAt(_week);
+        if (adjGlobalWeight == 0) return 0;
+
+        return adjAcctWeight * PRECISION / adjGlobalWeight;
+    }
+
+    function adjustedAccountWeightAt(address _account, uint _week) public view returns (uint) {
         uint acctWeight = staker.getAccountWeightAt(_account, _week);
-        if (acctWeight == 0) return 0; // User has no weight.
+        if (acctWeight == 0) return 0;
+        return acctWeight - staker.accountWeeklyToRealize(_account, _week + MAX_STAKE_GROWTH_WEEKS).weightPersistent;
+    }
+
+    function adjustedGlobalWeightAt(uint _week) public view returns (uint) {
         uint globalWeight = staker.getGlobalWeightAt(_week);
-        return acctWeight * PRECISION / globalWeight;
+        if (globalWeight == 0) return 0;
+        return globalWeight - staker.globalWeeklyToRealize(_week + MAX_STAKE_GROWTH_WEEKS).weightPersistent;
     }
 
     /**
@@ -186,7 +235,7 @@ contract SingleTokenRewardDistributor is WeekStart {
         uint _claimEndWeek
     ) external view returns (uint claimable) {
         uint currentWeek = getWeek();
-        if (_claimEndWeek > currentWeek) _claimEndWeek = currentWeek;
+        if (_claimEndWeek >= currentWeek) _claimEndWeek = currentWeek - 1;
         return _getTotalClaimableByRange(_account, _claimStartWeek, _claimEndWeek);
     }
 
@@ -196,7 +245,7 @@ contract SingleTokenRewardDistributor is WeekStart {
         uint _claimEndWeek
     ) internal view returns (uint claimableAmount) {
         for (uint i = _claimStartWeek; i <= _claimEndWeek; ++i) {
-            claimableAmount += getClaimableAt(_account, i);
+            claimableAmount += _getClaimableAt(_account, i);
         }
     }
 
@@ -215,7 +264,7 @@ contract SingleTokenRewardDistributor is WeekStart {
 
         // Loop from old towards recent.
         for (claimStartWeek; claimStartWeek <= currentWeek; claimStartWeek++) {
-            if (getClaimableAt(_account, claimStartWeek) > 0) {
+            if (_getClaimableAt(_account, claimStartWeek) > 0) {
                 canClaim = true;
                 break;
             }
@@ -225,7 +274,7 @@ contract SingleTokenRewardDistributor is WeekStart {
 
         // Loop backwards from recent week towards old. Skip current week.
         for (claimEndWeek = currentWeek - 1; claimEndWeek > claimStartWeek; claimEndWeek--) {
-            if (getClaimableAt(_account, claimEndWeek) > 0) {
+            if (_getClaimableAt(_account, claimEndWeek) > 0) {
                 break;
             }
         }
@@ -241,8 +290,15 @@ contract SingleTokenRewardDistributor is WeekStart {
     function getClaimableAt(
         address _account, 
         uint _week
-    ) public view returns (uint rewardAmount) {
+    ) external view returns (uint rewardAmount) {
         if(_week >= getWeek()) return 0;
+        return _getClaimableAt(_account, _week);
+    }
+
+    function _getClaimableAt(
+        address _account, 
+        uint _week
+    ) internal view returns (uint rewardAmount) {
         if(_week < accountInfo[_account].lastClaimWeek) return 0;
         uint rewardShare = computeSharesAt(_account, _week);
         uint totalWeeklyAmount = weeklyRewardAmount[_week];

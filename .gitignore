@@ -2,8 +2,8 @@
 .build/
 .cache/
 contracts/.cache
-tests/
 scripts/
+tests/
 contracts/.DS_Store
 
 # Python

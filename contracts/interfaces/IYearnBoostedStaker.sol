@@ -11,6 +11,11 @@ interface IYearnBoostedStaker {
         uint8 updateWeeksBitmap;
     }
 
+    struct ToRealize {
+        uint112 weightPersistent;
+        uint112 weight;
+    }
+
     enum ApprovalStatus {
         None,
         StakeOnly,
@@ -31,6 +36,10 @@ interface IYearnBoostedStaker {
     function pendingOwner() external view returns (address);
     function approvedCaller(address account, address caller) external view returns (ApprovalStatus);
     function approvedWeightedStaker(address staker) external view returns (bool);
+    function accountWeeklyToRealize(address account, uint week) external view returns (ToRealize memory);
+    function globalWeeklyToRealize(uint week) external view returns (ToRealize memory);
+    function accountWeeklyMaxStake(address account, uint week) external view returns (uint);
+    function globalWeeklyMaxStake(uint week) external view returns (uint);
 
     // Events
     event Stake(address indexed account, uint indexed week, uint amount, uint newUserWeight, uint weightAdded);
