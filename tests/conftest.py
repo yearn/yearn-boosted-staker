@@ -199,19 +199,23 @@ def deposit_rewards(yvmkusd_whale, rewards, fee_receiver, accounts):
     yield deposit_rewards
 
 @pytest.fixture(scope="session")
-def factory(project, yprisma, user, gov, rando):
+def registry(project, yprisma, user, gov, rando):
     approved_deployers = [rando]
-    rewards_factory = user.deploy(
-        project.YBSRewardsFactory
+    ybs_factory = user.deploy(
+        project.YBSFactory
+    )
+    reward_factory = user.deploy(
+        project.YBSRewardFactory
     )
     utils_factory = user.deploy(
         project.YBSUtilsFactory
     )
-    factory = user.deploy(
-        project.YBSFactory, 
+    registry = user.deploy(
+        project.YBSRegistry, 
         gov,
-        rewards_factory,
+        ybs_factory,
+        reward_factory,
         utils_factory,
         [rando],    # approved deployers
     )
-    yield factory
+    yield registry

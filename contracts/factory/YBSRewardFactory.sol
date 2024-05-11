@@ -5,7 +5,7 @@ import {IERC20, SingleTokenRewardDistributor, IYearnBoostedStaker} from "../Sing
 
 
 /// @title Deploys Rewards Distributor Contract
-contract YBSRewardsFactory{
+contract YBSRewardFactory{
 
     string public constant VERSION = "1.0.0";
 
