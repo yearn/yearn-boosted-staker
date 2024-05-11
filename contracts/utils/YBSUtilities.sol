@@ -2,9 +2,8 @@
 pragma solidity ^0.8.22;
 
 import {IERC20} from "@openzeppelin/contracts@v4.9.3/token/ERC20/IERC20.sol";
-
-import "../interfaces/IYearnBoostedStaker.sol";
-import "../interfaces/IRewardsDistributor.sol";
+import {IYearnBoostedStaker} from "../interfaces/IYearnBoostedStaker.sol";
+import {IRewardsDistributor} from "../interfaces/IRewardsDistributor.sol";
 
 contract YBSUtilities {
 

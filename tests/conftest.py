@@ -197,3 +197,21 @@ def deposit_rewards(yvmkusd_whale, rewards, fee_receiver, accounts):
         amt = 1_000 * 10 ** 18
         rewards.depositReward(amt, sender=fr_account)
     yield deposit_rewards
+
+@pytest.fixture(scope="session")
+def factory(project, yprisma, user, gov, rando):
+    approved_deployers = [rando]
+    rewards_factory = user.deploy(
+        project.YBSRewardsFactory
+    )
+    utils_factory = user.deploy(
+        project.YBSUtilsFactory
+    )
+    factory = user.deploy(
+        project.YBSFactory, 
+        gov,
+        rewards_factory,
+        utils_factory,
+        [rando],    # approved deployers
+    )
+    yield factory
