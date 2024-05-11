@@ -9,6 +9,36 @@ WEEK = 60 * 60 * 24 * 7
 def test_factory(
     user, staker, user2, user3, stable_token,rewards, gov, registry, yprisma, yvmkusd, rando
 ):
+    
+    registry.balance += 10**18
+    factories = registry.factories()
+    ybs_factory = project.YBSFactory.at(factories.yearnBoostedStaker)
+    reward_factory = project.YBSRewardFactory.at(factories.rewardDistributor)
+    utils_factory = project.YBSUtilsFactory.at(factories.utilities)
+    
+    snap = chain.snapshot()
+    tx = ybs_factory.deploy(
+        yprisma,
+        4, 
+        0,
+        gov,
+        sender=registry
+    )
+    temp_ybs = tx.return_value
+    tx = reward_factory.deploy(
+        temp_ybs,
+        yvmkusd, 
+        sender=registry
+    )
+    temp_reward = tx.return_value
+    tx = utils_factory.deploy(
+        temp_ybs,
+        temp_reward, 
+        sender=registry
+    )
+    temp_utils = tx.return_value
+    chain.restore(snap)
+
     tx = registry.createNewDeployment(
         yprisma, # _token,
         4,       # _max_stake_growth_weeks,
@@ -24,11 +54,13 @@ def test_factory(
     ybs = project.YearnBoostedStaker.at(event.yearnBoostedStaker)
     rewards = project.SingleTokenRewardDistributor.at(event.rewardDistributor)
     utils = project.YBSUtilities.at(event.utilities)
+    assert ybs.address == temp_ybs
+    assert rewards.address == temp_reward
+    assert utils.address == temp_utils
 
     assert ybs.address == rewards.staker()
     assert ybs.stakeToken() == utils.TOKEN()
 
-    factories = registry.factories()
     deployment = registry.deployments(yprisma)
 
     # Prevent a duplicate deployment
@@ -50,6 +82,45 @@ def test_factory(
             yprisma, # _reward_token
             sender=user
         )
+
+    # Test CREATE2 blocks redeployment based on msg.sender
+    with ape.reverts():
+        tx = ybs_factory.deploy(
+            yprisma,
+            4, 
+            0,
+            gov,
+            sender=registry
+        )
+    tx = ybs_factory.deploy(
+        yprisma,
+        4, 
+        0,
+        gov,
+        sender=user
+    )
+    with ape.reverts():
+        tx = reward_factory.deploy(
+            deployment.yearnBoostedStaker,
+            yvmkusd, 
+            sender=registry
+        )
+    tx = reward_factory.deploy(
+        deployment.yearnBoostedStaker,
+        yvmkusd, 
+        sender=user
+    )
+    with ape.reverts():
+        tx = utils_factory.deploy(
+            deployment.yearnBoostedStaker,
+            deployment.rewardDistributor, 
+            sender=registry
+        )
+    tx = utils_factory.deploy(
+        deployment.yearnBoostedStaker,
+        deployment.rewardDistributor, 
+        sender=user
+    )
     
     # Check adding / removing deployer
     tx = registry.approveDeployer(user, True, sender=gov)

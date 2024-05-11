@@ -70,7 +70,7 @@ contract YBSRegistry{
 
     /**
      * @notice Creates a new YBS Staker.
-     * @param _token The token to stake
+     * @param _token The token to stake.
      * @param _max_stake_growth_weeks Amount of stake growth transitions.
      * @param _start_time Timestamp at which to start the week counter.
      */

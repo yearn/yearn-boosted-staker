@@ -13,9 +13,18 @@ contract YBSUtilsFactory{
         address _ybs,
         address _rewardsDistributor
     ) external returns (address utils) {
-        return address(new YBSUtilities(
-            IYearnBoostedStaker(_ybs),
-            IRewardsDistributor(_rewardsDistributor)
-        ));
+        uint256 salt = uint256(uint160(address(msg.sender)));
+        bytes memory bytecode = type(YBSUtilities).creationCode;
+        bytes memory bytecodeWithArgs = abi.encodePacked(
+            bytecode,
+            abi.encode(_ybs, _rewardsDistributor)
+        );
+        address deployedAddress;
+        assembly {
+            deployedAddress := create2(0, add(bytecodeWithArgs, 0x20), mload(bytecodeWithArgs), salt)
+        }
+        require(deployedAddress != address(0), "Failed to deploy contract");
+
+        return deployedAddress;
     }
 }
