@@ -50,8 +50,6 @@ def test_factory(
             yprisma, # _reward_token
             sender=user
         )
-
-    registry.approveDeployer(user, True, sender=gov)
     
     # Check adding / removing deployer
     tx = registry.approveDeployer(user, True, sender=gov)
@@ -73,7 +71,7 @@ def test_factory(
 
     for i in range(0, registry.numTokens()):
         token = registry.tokens(i)
-        deployment = registry.deployment(token)
+        deployment = registry.deployments(token)
         assert deployment.yearnBoostedStaker != ZERO_ADDRESS
         assert deployment.rewardDistributor != ZERO_ADDRESS
         assert deployment.utilities != ZERO_ADDRESS
