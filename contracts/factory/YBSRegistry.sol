@@ -11,16 +11,16 @@ interface IFactory {
 /// @notice Deploys and endorses set of new YBS contracts.
 contract YBSRegistry{
 
+    string public constant VERSION = "1.0.0";
     address public owner;
     address public pendingOwner;
-    string public constant VERSION = "1.0.0";
     Factories public factories;
-    mapping(address => Deployment) public deployments;
-    mapping(address => bool) approvedDeployers;
     address[] public tokens;
     uint public numTokens;
+    mapping(address => Deployment) public deployments;
+    mapping(address => bool) approvedDeployers;
 
-    event NewDeployment(address yearnBoostedStaker, address rewardDistributor, address utilities);
+    event NewDeployment(address indexed yearnBoostedStaker, address indexed rewardDistributor, address indexed utilities);
     event DeployerApproved(address indexed deployer, bool indexed approved);
     event DistributorUpdated(address indexed token, address indexed distributor);
     event UtilitiesUpdated(address indexed token, address indexed utilities);
@@ -73,6 +73,7 @@ contract YBSRegistry{
      * @param _token The token to stake.
      * @param _max_stake_growth_weeks Amount of stake growth transitions.
      * @param _start_time Timestamp at which to start the week counter.
+     * @param _reward_token Token to be distributed to stakers via rewards distirbutor.
      */
     function createNewDeployment(
         address _token,
@@ -114,7 +115,9 @@ contract YBSRegistry{
     }
 
     /**
-        @notice Modify the reward distributor contract for a specified deployment
+        @notice Modify the reward distributor contract for a specified deployment.
+        @param _token Token value used to identify deployment.
+        @param _distributor New rewards distributor contract.
     */
     function updateRewardDistributor(address _token, address _distributor) external {
         require(msg.sender == owner, "!authorized");
@@ -125,7 +128,9 @@ contract YBSRegistry{
     }
 
     /**
-        @notice Modify the utilities contract for a specified deployment
+        @notice Modify the utilities contract for a specified deployment.
+        @param _token Token value used to identify deployment.
+        @param _utils New utilities contract.
     */
     function updateUtilities(address _token, address _utils) external {
         require(msg.sender == owner, "!authorized");
@@ -137,6 +142,9 @@ contract YBSRegistry{
 
     /**
         @notice Update the deployer factories for each of the 3 YBS contracts.
+        @param _ybsFactory New ybs factory to be used for future deployments.
+        @param _rewardFactory New reward factory to be used for future deployments.
+        @param _utilsFactory New utils factory to be used for future deployments.
     */
     function updateFactories(IFactory _ybsFactory, IFactory _rewardFactory, IFactory _utilsFactory) external {
         require(msg.sender == owner, "!authorized");
@@ -148,6 +156,11 @@ contract YBSRegistry{
         emit FactoriesUpdated(address(_ybsFactory), address(_rewardFactory), address(_utilsFactory));
     }
 
+    /**
+        @notice Check whether an address is approved to deploy via registry.
+        @param _deployer Address to check.
+        @return approved status of checked address.
+    */
     function isApprovedDeployer(address _deployer) public view returns (bool) {
         if (_deployer == owner) return true;
         return approvedDeployers[_deployer];

@@ -16,6 +16,7 @@ def test_factory(
     reward_factory = project.YBSRewardFactory.at(factories.rewardDistributor)
     utils_factory = project.YBSUtilsFactory.at(factories.utilities)
     
+    ### Perform direct deployments from factories, and cache resulting address
     snap = chain.snapshot()
     tx = ybs_factory.deploy(
         yprisma,
@@ -37,8 +38,10 @@ def test_factory(
         sender=registry
     )
     temp_utils = tx.return_value
+
     chain.restore(snap)
 
+    # Deploy from registry
     tx = registry.createNewDeployment(
         yprisma, # _token,
         4,       # _max_stake_growth_weeks,
@@ -54,6 +57,8 @@ def test_factory(
     ybs = project.YearnBoostedStaker.at(event.yearnBoostedStaker)
     rewards = project.SingleTokenRewardDistributor.at(event.rewardDistributor)
     utils = project.YBSUtilities.at(event.utilities)
+
+    # Check that registry deployment addresses match the direct deployment addresses
     assert ybs.address == temp_ybs
     assert rewards.address == temp_reward
     assert utils.address == temp_utils
@@ -83,7 +88,7 @@ def test_factory(
             sender=user
         )
 
-    # Test CREATE2 blocks redeployment based on msg.sender
+    # Test CREATE2 blocks identical deployment based on msg.sender
     with ape.reverts():
         tx = ybs_factory.deploy(
             yprisma,
@@ -92,6 +97,7 @@ def test_factory(
             gov,
             sender=registry
         )
+    # CREATE2 permits identical deployment based on different msg.sender  
     tx = ybs_factory.deploy(
         yprisma,
         4, 
