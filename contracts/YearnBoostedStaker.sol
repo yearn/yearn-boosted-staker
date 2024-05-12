@@ -76,6 +76,7 @@ contract YearnBoostedStaker {
         @param _start_time  allows deployer to optionally set a custom start time.
                             useful if needed to line up with week count in another system.
                             Passing a value of 0 will start at block.timestamp.
+        @param _owner       Owner is able to grant access to stake with max boost.
     */
     constructor(address _token, uint _max_stake_growth_weeks, uint _start_time, address _owner) {
         owner = _owner;

@@ -2,9 +2,8 @@
 pragma solidity ^0.8.22;
 
 import {IERC20} from "@openzeppelin/contracts@v4.9.3/token/ERC20/IERC20.sol";
-
-import "../interfaces/IYearnBoostedStaker.sol";
-import "../interfaces/IRewardsDistributor.sol";
+import {IYearnBoostedStaker} from "../interfaces/IYearnBoostedStaker.sol";
+import {IRewardsDistributor} from "../interfaces/IRewardsDistributor.sol";
 
 contract YBSUtilities {
 
@@ -150,8 +149,8 @@ contract YBSUtilities {
             getGlobalProjectedBoostMultiplier();
 
         if(avgBoost == 0) return (0, 0);
-        uint minApr = avgApr * _minBoost() / avgBoost;
-        uint maxApr = avgApr * _maxBoost() / avgBoost;
+        uint minApr = avgApr * minBoost() / avgBoost;
+        uint maxApr = avgApr * maxBoost() / avgBoost;
         return (minApr, maxApr);
     }
 
@@ -165,12 +164,12 @@ contract YBSUtilities {
         return regularStake + YBS.globalWeeklyMaxStake(_week);
     }
 
-    function _minBoost() internal pure returns (uint) {
+    function minBoost() public pure returns (uint) {
         return PRECISION; // 1x is the min
     }
 
-    function _maxBoost() internal view returns (uint) {
-        return _minBoost() * (MAX_STAKE_GROWTH_WEEKS + 1);
+    function maxBoost() public view returns (uint) {
+        return minBoost() * (MAX_STAKE_GROWTH_WEEKS + 1);
     }
 
     function adjustedAccountWeightAt(address _account, uint _week) public view returns (uint) {

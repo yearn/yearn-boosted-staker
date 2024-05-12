@@ -437,7 +437,7 @@ def check_invariants(accounts, staker, user_data, yprisma, global_growth):
         assert user_balance == (realized + pending) * 2
         assert user_balance == user_data[u]['balance_of']
         assert user_balance == pytest.approx((realized + pending) * 2, abs=4)
-        Decimal(user_balance) == Decimal((realized + pending) * 2) # Convert to decimal so we can preserve precision
+        assert Decimal(user_balance) == Decimal((realized + pending) * 2) # Convert to decimal so we can preserve precision
         assert int(Decimal(user_balance) * Decimal(2.5)) >= weight # Weight can never be more than 2.5x boost
         assert user_balance <= starting_balance
         assert yprisma.balanceOf(u) <= starting_balance + staked_with_weight # Make sure user never got a surplus
