@@ -8,7 +8,7 @@ import {IERC20, SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeE
 contract SingleTokenRewardDistributor is WeekStart {
     using SafeERC20 for IERC20;
 
-    uint constant PRECISION = 1e18;
+    uint constant public PRECISION = 1e18;
     IYearnBoostedStaker public immutable staker;
     IERC20 public immutable rewardToken;
     uint public immutable START_WEEK;
