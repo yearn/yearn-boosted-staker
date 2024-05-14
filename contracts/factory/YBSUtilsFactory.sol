@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GNU AGPLv3
 pragma solidity ^0.8.22;
 
-import {IERC20, YBSUtilities, IRewardsDistributor, IYearnBoostedStaker} from "../utils/YBSUtilities.sol";
+import {IERC20, YBSUtilities, IRewardDistributor, IYearnBoostedStaker} from "../utils/YBSUtilities.sol";
 
 
 /// @title Deploys Rewards Distributor Contract

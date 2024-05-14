@@ -65,7 +65,7 @@ def test_taget_weight_user(
     ]
     
     for data in simulation_data:
-        simulate_with_data(data, rewards, staker, chain, yprisma, fee_receiver_acc)
+        simulate_with_data(data, rewards, staker, yprisma, fee_receiver_acc)
 
 
 def simulate_with_data(data, rewards, staker, yprisma, fee_receiver_acc):

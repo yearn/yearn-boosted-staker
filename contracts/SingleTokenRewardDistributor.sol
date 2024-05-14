@@ -8,7 +8,7 @@ import {IERC20, SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeE
 contract SingleTokenRewardDistributor is WeekStart {
     using SafeERC20 for IERC20;
 
-    uint constant public PRECISION = 1e18;
+    uint constant public PRECISION = 1e27;
     IYearnBoostedStaker public immutable staker;
     IERC20 public immutable rewardToken;
     uint public immutable START_WEEK;
@@ -251,7 +251,7 @@ contract SingleTokenRewardDistributor is WeekStart {
 
     /**
         @notice Helper function returns suggested start and end range for claim weeks.
-        @dev    This function is designed to be called prior to ranged claims to shorted the number of iterations
+        @dev    This function is designed to be called prior to ranged claims to shorten the number of iterations
                 required to loop if possible.
     */
     function getSuggestedClaimRange(address _account) public view returns (uint claimStartWeek, uint claimEndWeek) {

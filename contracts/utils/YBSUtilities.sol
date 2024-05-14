@@ -3,7 +3,7 @@ pragma solidity ^0.8.22;
 
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {IYearnBoostedStaker} from "../interfaces/IYearnBoostedStaker.sol";
-import {IRewardsDistributor} from "../interfaces/IRewardsDistributor.sol";
+import {IRewardDistributor} from "../interfaces/IRewardDistributor.sol";
 
 contract YBSUtilities {
 
@@ -12,11 +12,11 @@ contract YBSUtilities {
     uint public immutable MAX_STAKE_GROWTH_WEEKS;
     IERC20 public immutable TOKEN;
     IYearnBoostedStaker public immutable YBS;
-    IRewardsDistributor public immutable REWARDS_DISTRIBUTOR;
+    IRewardDistributor public immutable REWARDS_DISTRIBUTOR;
 
     constructor(
         IYearnBoostedStaker _ybs,
-        IRewardsDistributor _rewardsDistributor
+        IRewardDistributor _rewardsDistributor
     ) {
         YBS = _ybs;
         REWARDS_DISTRIBUTOR = _rewardsDistributor;
