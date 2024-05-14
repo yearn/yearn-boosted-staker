@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GNU AGPLv3
 pragma solidity ^0.8.18;
 
-import {IERC20} from "@openzeppelin/contracts@v4.9.3/token/ERC20/IERC20.sol";
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 interface IRewardsDistributor {
     // Structs
@@ -34,4 +34,5 @@ interface IRewardsDistributor {
     function approveClaimer(address _claimer, bool _approved) external;
     function getWeek() external view returns (uint);
     function weeklyRewardAmount(uint) external view returns (uint);
+    function pushRewards(uint _week) external returns (bool);
 }

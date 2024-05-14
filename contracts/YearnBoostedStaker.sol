@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity ^0.8.22;
 
-import {IERC20, SafeERC20} from "@openzeppelin/contracts@v4.9.3/token/ERC20/utils/SafeERC20.sol";
-import {IERC20Metadata} from "@openzeppelin/contracts@v4.9.3/token/ERC20/extensions/IERC20Metadata.sol";
+import {IERC20, SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import {IERC20Metadata} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 
 contract YearnBoostedStaker {
     using SafeERC20 for IERC20;
@@ -190,8 +190,6 @@ contract YearnBoostedStaker {
 
         accountWeeklyWeights[_account][systemWeek] = accountWeight + weight;
         globalWeeklyWeights[systemWeek] = globalWeight + weight;
-
-        
 
         accountData[_account] = acctData;
         totalSupply += _amount;

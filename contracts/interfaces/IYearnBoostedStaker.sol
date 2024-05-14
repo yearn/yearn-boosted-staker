@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity ^0.8.22;
 
-import {IERC20, SafeERC20} from "@openzeppelin/contracts@v4.9.3/token/ERC20/utils/SafeERC20.sol";
+import {IERC20, SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
 interface IYearnBoostedStaker {
     struct AccountData {
@@ -51,7 +51,7 @@ interface IYearnBoostedStaker {
     // Functions
     function stake(uint _amount) external returns (uint);
     function stakeFor(address _account, uint _amount) external returns (uint);
-    function stakeAsWeighted(address _account, uint _amount, uint _idx) external returns (uint);
+    function stakeAsMaxWeighted(address _account, uint _amount) external returns (uint);
     function unstake(uint _amount, address _receiver) external returns (uint);
     function unstakeFor(address _account, uint _amount, address _receiver) external returns (uint);
 
