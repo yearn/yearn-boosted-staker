@@ -49,24 +49,11 @@ contract SingleTokenRewardDistributor is WeekStart {
         @param _amount the amount of reward token to deposit.
     */
     function depositReward(uint _amount) external {
-        _depositReward(msg.sender, _amount);
-    }
-
-    /**
-        @notice Allow permissionless deposits to the current week from any address with approval.
-        @param _target the address to pull tokens from.
-        @param _amount the amount of reward token to deposit.
-    */
-    function depositRewardFrom(address _target, uint _amount) external {
-        _depositReward(_target, _amount);
-    }
-
-    function _depositReward(address _target, uint _amount) internal {
         if (_amount > 0) {
             uint week = getWeek();
             weeklyRewardAmount[week] += _amount;
-            rewardToken.safeTransferFrom(_target, address(this), _amount);
-            emit RewardDeposited(week, _target, _amount);
+            rewardToken.safeTransferFrom(msg.sender, address(this), _amount);
+            emit RewardDeposited(week, msg.sender, _amount);
         }
     }
 
