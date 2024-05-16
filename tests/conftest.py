@@ -21,6 +21,13 @@ w3 = Web3(HTTPProvider(os.getenv("CHAIN_PROVIDER", "http://127.0.0.1:8545")))
 # Accounts
 @pytest.fixture(scope="session")
 def gov(accounts):
+    gov = accounts['0xFEB4acf3df3cDEA7399794D0869ef76A6EfAff52']
+    gov.balance += 10 ** 18
+    # accounts[0].transfer(gov, 10**18)
+    yield gov
+
+@pytest.fixture(scope="session")
+def ylockers(accounts):
     gov = accounts['0x4444AAAACDBa5580282365e25b16309Bd770ce4a']
     gov.balance += 10 ** 18
     # accounts[0].transfer(gov, 10**18)
@@ -101,17 +108,30 @@ def yvmkusd_whale(accounts, yvmkusd, fee_receiver, mkusd):
     yield whale
 
 @pytest.fixture(scope="session")
-def staker(project, yprisma, user, gov, prisma_vault):
-    start_time = Contract('0x5d17eA085F2FF5da3e6979D5d26F1dBaB664ccf8').startTime()
-    start_time = 0
-    staker = user.deploy(
-        project.YearnBoostedStaker, 
-        yprisma, 
-        4, # <-- Number of growth weeks
-        start_time,
-        gov,
+def staker(project, yprisma, user, gov, yvmkusd, registry):
+    MAX_GROWTH_WEEKS = 4
+    PRISMA_CORE = '0x5d17eA085F2FF5da3e6979D5d26F1dBaB664ccf8'
+    start_time = Contract(PRISMA_CORE).startTime()
+    tx = registry.createNewDeployment(
+        yprisma,  # token
+        MAX_GROWTH_WEEKS,   # max stake growth weeks
+        start_time,         # start time
+        yvmkusd,
+        sender=gov
     )
-    yield staker
+    registry.deployments(yprisma)
+    deployments = registry.deployments(yprisma)
+    yield project.YearnBoostedStaker.at(deployments.yearnBoostedStaker)
+    # start_time = Contract('0x5d17eA085F2FF5da3e6979D5d26F1dBaB664ccf8').startTime()
+    # start_time = 0
+    # staker = user.deploy(
+    #     project.YearnBoostedStaker, 
+    #     yprisma, 
+    #     4, # <-- Number of growth weeks
+    #     start_time,
+    #     gov,
+    # )
+    # yield staker
 
 @pytest.fixture(scope="session")
 def prisma_vault():
@@ -126,22 +146,26 @@ def stable_token(yvmkusd):
     yield yvmkusd
 
 @pytest.fixture(scope="session")
-def rewards(project, user, staker, gov_token, stable_token, gov):
-    rewards_contract = user.deploy(
-        project.SingleTokenRewardDistributor,
-        staker,
-        stable_token,
-    )
-    yield rewards_contract
+def rewards(project, registry, user, yprisma, staker, gov_token, stable_token, gov):
+    deployments = registry.deployments(yprisma)
+    yield project.SingleTokenRewardDistributor.at(deployments.rewardDistributor)
+    # rewards_contract = user.deploy(
+    #     project.SingleTokenRewardDistributor,
+    #     staker,
+    #     stable_token,
+    # )
+    # yield rewards_contract
 
 @pytest.fixture(scope="session")
-def utils(project, user, staker, rewards, stable_token):
-    utils = user.deploy(
-        project.YBSUtilities,
-        staker,
-        rewards,
-    )
-    yield utils
+def utils(project, registry, staker, rewards, stable_token):
+    deployments = registry.deployments(yprisma)
+    yield project.YBSUtilities.at(deployments.utilities)
+    # utils = user.deploy(
+    #     project.YBSUtilities,
+    #     staker,
+    #     rewards,
+    # )
+    # yield utils
 
 @pytest.fixture(scope="session")
 def fee_receiver(rewards, accounts, gov_token, stable_token):
@@ -216,6 +240,7 @@ def registry(project, yprisma, user, gov, rando):
         ybs_factory,
         reward_factory,
         utils_factory,
-        [rando],    # approved deployers
+        approved_deployers,    # approved deployers
     )
     yield registry
+    # yield Contract('0x262be1d31d0754399d8d5dc63B99c22146E9f738')

@@ -116,7 +116,6 @@ contract YBSUtilities {
 
     function getGlobalProjectedApr(uint _stakeTokenPrice, uint _rewardTokenPrice) public view returns (uint) {
         if (_stakeTokenPrice == 0 || _rewardTokenPrice == 0) return 0;
-        uint currentWeek = getWeek();
         uint rewardsAmount = projectedRewardAmount();
         if (rewardsAmount == 0) return 0;
         uint supply = YBS.totalSupply();
