@@ -17,6 +17,7 @@ interface IRewardDistributor {
     event ClaimerApproved(address indexed account, address indexed claimer, bool approved);
 
     // Functions
+    function PRECISION() external view returns (uint256);
     function staker() external view returns (address);
     function rewardToken() external view returns (address);
     function depositReward(uint _amount) external;

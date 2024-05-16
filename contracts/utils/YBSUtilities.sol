@@ -4,10 +4,13 @@ pragma solidity ^0.8.22;
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {IYearnBoostedStaker} from "../interfaces/IYearnBoostedStaker.sol";
 import {IRewardDistributor} from "../interfaces/IRewardDistributor.sol";
+import {IERC20Metadata} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 
 contract YBSUtilities {
 
     uint constant PRECISION = 1e18;
+    uint immutable STAKE_TOKEN_DECIMALS;
+    uint immutable REWARD_TOKEN_DECIMALS;
     uint constant WEEKS_PER_YEAR = 52;
     uint public immutable MAX_STAKE_GROWTH_WEEKS;
     IERC20 public immutable TOKEN;
@@ -21,6 +24,8 @@ contract YBSUtilities {
         YBS = _ybs;
         REWARDS_DISTRIBUTOR = _rewardsDistributor;
         TOKEN = YBS.stakeToken();
+        STAKE_TOKEN_DECIMALS = YBS.decimals();
+        REWARD_TOKEN_DECIMALS = IERC20Metadata(_rewardsDistributor.rewardToken()).decimals();
         MAX_STAKE_GROWTH_WEEKS = YBS.MAX_STAKE_GROWTH_WEEKS();
     }
 
@@ -30,10 +35,10 @@ contract YBSUtilities {
         // Ignore current week stake
         uint balance = YBS.balanceOf(_user) - getAccountStakeAmountAt(_user, currentWeek);
         if (balance == 0) return 0;
-        // Ignore last week weight ()
+        // Ignore last week weight
         uint weight = adjustedAccountWeightAt(_user, currentWeek - 1);
         if (weight == 0) return 0;
-        return weight * PRECISION / balance;
+        return weight * STAKE_TOKEN_DECIMALS / balance;
     }
 
     // Boost multiplier if week were to end today
@@ -43,37 +48,54 @@ contract YBSUtilities {
         if (balance == 0) return 0;
         uint weight = adjustedAccountWeightAt(_user, currentWeek);
         if (weight == 0) return 0;
-        return weight * PRECISION / balance;
+        return weight * STAKE_TOKEN_DECIMALS / balance;
     }
 
     function getUserActiveApr(address _account, uint _stakeTokenPrice, uint _rewardTokenPrice) external view returns (uint) {
         if (_stakeTokenPrice == 0 || _rewardTokenPrice == 0) return 0;
         uint currentWeek = getWeek();
         if(currentWeek == 0) return 0;
-        uint rewardsAmount = activeRewardAmount();
+        uint rewardsAmount = scaleDecimals(
+            activeRewardAmount(),
+            REWARD_TOKEN_DECIMALS
+        );
         if (rewardsAmount == 0) return 0;
         uint userShare = REWARDS_DISTRIBUTOR.computeSharesAt(_account, currentWeek - 1);
         if (userShare == 0) return 0;
         uint userRewards = userShare * rewardsAmount;
         if (userRewards == 0) return 0;
-        uint userStakedBalance = YBS.balanceOf(_account) - getAccountStakeAmountAt(_account, currentWeek);
+        uint userStakedBalance = YBS.balanceOf(_account);
         if (userStakedBalance == 0) return 0;
-        return (_rewardTokenPrice * userRewards) * WEEKS_PER_YEAR / (userStakedBalance * _stakeTokenPrice);
+        uint currentWeekStaked = getAccountStakeAmountAt(_account, currentWeek);
+        uint lastWeekStaked = getAccountStakeAmountAt(_account, currentWeek);
+        if(userStakedBalance >= currentWeekStaked + lastWeekStaked){
+            userStakedBalance - currentWeekStaked - lastWeekStaked;
+        }
+        userStakedBalance = scaleDecimals(userStakedBalance, STAKE_TOKEN_DECIMALS);
+        uint precisionOffset = 1 + REWARDS_DISTRIBUTOR.PRECISION() - PRECISION;
+        return (_rewardTokenPrice * userRewards) * WEEKS_PER_YEAR / (userStakedBalance * _stakeTokenPrice) / precisionOffset;
     }
 
     function getUserProjectedApr(address _account, uint _stakeTokenPrice, uint _rewardTokenPrice) public view returns (uint) {
         if (_stakeTokenPrice == 0 || _rewardTokenPrice == 0) return 0;
         uint currentWeek = getWeek();
         if(currentWeek == 0) return 0;
-        uint rewardsAmount = projectedRewardAmount();
+        uint rewardsAmount = scaleDecimals(
+            projectedRewardAmount(),
+            REWARD_TOKEN_DECIMALS
+        );
         if (rewardsAmount == 0) return 0;
         uint userShare = REWARDS_DISTRIBUTOR.computeSharesAt(_account, currentWeek);
         if (userShare == 0) return 0;
         uint userRewards = userShare * rewardsAmount;
         if (userRewards == 0) return 0;
-        uint userStakedBalance = YBS.balanceOf(_account);
+        uint userStakedBalance = scaleDecimals(
+            YBS.balanceOf(_account) - getAccountStakeAmountAt(_account, currentWeek),
+            STAKE_TOKEN_DECIMALS
+        );
         if (userStakedBalance == 0) return 0;
-        return (_rewardTokenPrice * userRewards) * WEEKS_PER_YEAR / (userStakedBalance * _stakeTokenPrice);
+        uint precisionOffset = 1 + REWARDS_DISTRIBUTOR.PRECISION() - PRECISION;
+        return (_rewardTokenPrice * userRewards) * WEEKS_PER_YEAR / (userStakedBalance * _stakeTokenPrice) / precisionOffset;
     }
 
     function getGlobalActiveBoostMultiplier() public view returns (uint) {
@@ -82,7 +104,7 @@ contract YBSUtilities {
         if (supply == 0) return 0;
         uint weight = adjustedGlobalWeightAt(currentWeek - 1);
         if (weight == 0) return 0;
-        return weight * PRECISION / supply;
+        return weight * STAKE_TOKEN_DECIMALS / supply;
     }
 
     function getGlobalProjectedBoostMultiplier() public view returns (uint) {
@@ -91,7 +113,7 @@ contract YBSUtilities {
         if (supply == 0) return 0;
         uint weight = adjustedGlobalWeightAt(currentWeek);
         if (weight == 0) return 0;
-        return weight * PRECISION / supply;
+        return weight * STAKE_TOKEN_DECIMALS / supply;
     }
     
 
@@ -100,11 +122,17 @@ contract YBSUtilities {
         if (_stakeTokenPrice == 0 || _rewardTokenPrice == 0) return 0;
         uint currentWeek = getWeek();
         if(currentWeek == 0) return 0;
-        uint rewardsAmount = activeRewardAmount();
+        uint rewardsAmount = scaleDecimals(activeRewardAmount(), REWARD_TOKEN_DECIMALS);
         if (rewardsAmount == 0) return 0;
         // Get total supply, but reduce by amount that has been staked in current week
-        uint supply = YBS.totalSupply() - getGlobalStakeAmountAt(currentWeek);
+        uint supply = YBS.totalSupply();
+        uint currentWeekAmount = getGlobalStakeAmountAt(currentWeek);
+        uint lastWeekAmount = getGlobalStakeAmountAt(currentWeek - 1);
+        if (supply >= currentWeekAmount + lastWeekAmount) {
+            supply = supply - currentWeekAmount - lastWeekAmount;
+        }
         if (supply == 0) return 0;
+        supply = scaleDecimals(supply, STAKE_TOKEN_DECIMALS);
         return (
             rewardsAmount * 
             _rewardTokenPrice *
@@ -116,9 +144,16 @@ contract YBSUtilities {
 
     function getGlobalProjectedApr(uint _stakeTokenPrice, uint _rewardTokenPrice) public view returns (uint) {
         if (_stakeTokenPrice == 0 || _rewardTokenPrice == 0) return 0;
-        uint rewardsAmount = projectedRewardAmount();
+        uint currentWeek = getWeek();
+        uint rewardsAmount = scaleDecimals(
+            projectedRewardAmount(),
+            REWARD_TOKEN_DECIMALS
+        );
         if (rewardsAmount == 0) return 0;
-        uint supply = YBS.totalSupply();
+        uint supply = scaleDecimals(
+            YBS.totalSupply() - getGlobalStakeAmountAt(currentWeek),
+            STAKE_TOKEN_DECIMALS
+        );
         if (supply == 0) return 0;
         return (
             rewardsAmount * 
@@ -200,5 +235,15 @@ contract YBSUtilities {
 
     function getWeek() public view returns (uint) {
         return YBS.getWeek();
+    }
+
+    function scaleDecimals(uint256 amount, uint256 currentDecimals) public pure returns (uint256) {
+        require(currentDecimals <= 18, "Bad Decimals");
+
+        if (currentDecimals == 18) {
+            return amount;
+        }
+        uint256 decimalsToScale = 18 - currentDecimals;
+        return amount * 10 ** decimalsToScale;
     }
 }

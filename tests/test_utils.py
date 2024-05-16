@@ -41,8 +41,9 @@ def test_utils(
     # Should be 0 until we push rewards!
     assert 0 == utils.getGlobalProjectedApr(stake_token_price, reward_token_price)
 
-    assert rewards.pushableRewards(0) > 0
-    rewards.pushRewards(0,sender=user)
+    week = rewards.getWeek() - 1
+    assert rewards.pushableRewards(week) > 0
+    rewards.pushRewards(week,sender=user)
 
     # OK now projected APRs should work!
     user_proj_apr = utils.getUserProjectedApr(user, stake_token_price, reward_token_price)

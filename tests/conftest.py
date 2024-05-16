@@ -157,7 +157,7 @@ def rewards(project, registry, user, yprisma, staker, gov_token, stable_token, g
     # yield rewards_contract
 
 @pytest.fixture(scope="session")
-def utils(project, registry, staker, rewards, stable_token):
+def utils(project, registry, staker, yprisma, rewards, stable_token):
     deployments = registry.deployments(yprisma)
     yield project.YBSUtilities.at(deployments.utilities)
     # utils = user.deploy(
