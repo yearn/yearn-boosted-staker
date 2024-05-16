@@ -168,7 +168,7 @@ contract YBSUtilities {
     }
 
     function maxBoost() public view returns (uint) {
-        return minBoost() * (MAX_STAKE_GROWTH_WEEKS + 1);
+        return minBoost() * (MAX_STAKE_GROWTH_WEEKS + 1) / 2;
     }
 
     function adjustedAccountWeightAt(address _account, uint _week) public view returns (uint) {
