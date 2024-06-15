@@ -62,21 +62,47 @@ def yprisma():
     yield Contract('0xe3668873D944E4A949DA05fc8bDE419eFF543882')
 
 @pytest.fixture(scope="session")
+def strategy(token, yprisma, ycrv):
+    if token == yprisma:
+        return Contract('0xA323CCcbCbaDe7806ca5bB9951bebD89A7882bf8')
+    if token == ycrv:
+        return Contract('0xBdF157c3bad2164Ce6F9dc607fd115374010c5dC')
+
+@pytest.fixture(scope="session")
+def ycrv():
+    yield Contract('0xFCc5c47bE19d06BF83eB04298b026F81069ff65b')
+
+@pytest.fixture(scope="session")
+def token(ycrv, yprisma):
+    yield ycrv
+
+@pytest.fixture(scope="session")
 def prisma():
     yield Contract('0xdA47862a83dac0c112BA89c6abC2159b95afd71C')
 
 @pytest.fixture(scope="session")
-def yprisma_whale(accounts, fee_receiver, user, yprisma, user2, user3, rando, gov):
-    whale = accounts['0x69833361991ed76f9e8DBBcdf9ea1520fEbFb4a7']
+def token_whale(accounts, fee_receiver, user, yprisma, ycrv, user2, user3, rando, gov, token):
+    if token == yprisma:
+        whale = accounts['0x69833361991ed76f9e8DBBcdf9ea1520fEbFb4a7']
+    if token == ycrv:
+        whale = accounts['0x71E47a4429d35827e0312AA13162197C23287546']
     whale.balance += 10 ** 18
-    yprisma.transfer(user, 100_000 * 10 ** 18, sender=whale)
-    yprisma.transfer(user2, 100_000 * 10 ** 18, sender=whale)
-    yprisma.transfer(user3, 100_000 * 10 ** 18, sender=whale)
-    yprisma.transfer(fee_receiver, 200_000 * 10 ** 18, sender=whale)
-    yprisma.transfer(rando, 100_000 * 10 ** 18, sender=whale)
-    yprisma.transfer(gov, 100_000 * 10 ** 18, sender=whale)
+    token.transfer(user, 100_000 * 10 ** 18, sender=whale)
+    token.transfer(user2, 100_000 * 10 ** 18, sender=whale)
+    token.transfer(user3, 100_000 * 10 ** 18, sender=whale)
+    token.transfer(fee_receiver, 200_000 * 10 ** 18, sender=whale)
+    token.transfer(rando, 100_000 * 10 ** 18, sender=whale)
+    token.transfer(gov, 100_000 * 10 ** 18, sender=whale)
     yield whale
 
+@pytest.fixture(scope="session")
+def reward_token_whale(accounts, fee_receiver, yprisma, ycrv, token):
+    if token == yprisma:
+        whale = accounts[fee_receiver.address]
+    if token == ycrv:
+        whale = accounts['0x16388463d60FFE0661Cf7F1f31a7D658aC790ff7']
+    whale.balance += 10 ** 18
+    yield whale
 
 @pytest.fixture(scope="session")
 def mkusd():
@@ -108,30 +134,30 @@ def yvmkusd_whale(accounts, yvmkusd, fee_receiver, mkusd):
     yield whale
 
 @pytest.fixture(scope="session")
-def staker(project, yprisma, user, gov, yvmkusd, registry):
+def old_utils(project, token, user, gov, registry):
+    deployments = registry.deployments(token)
+    utils = deployments['utilities']
+    if utils == ZERO_ADDRESS:
+        yield ZERO_ADDRESS
+    yield Contract(utils)
+
+@pytest.fixture(scope="session")
+def staker(project, token, user, gov, registry):
+    deployments = registry.deployments(token)
+    ybs = deployments['yearnBoostedStaker']
+    if ybs != ZERO_ADDRESS:
+        return Contract(ybs)
+    # Not already deployed, so deploy new
     MAX_GROWTH_WEEKS = 4
-    PRISMA_CORE = '0x5d17eA085F2FF5da3e6979D5d26F1dBaB664ccf8'
-    start_time = Contract(PRISMA_CORE).startTime()
-    tx = registry.createNewDeployment(
-        yprisma,  # token
-        MAX_GROWTH_WEEKS,   # max stake growth weeks
-        start_time,         # start time
-        yvmkusd,
-        sender=gov
+    start_time = 0
+    staker = user.deploy(
+        project.YearnBoostedStaker, 
+        token, 
+        MAX_GROWTH_WEEKS,
+        start_time,
+        gov,
     )
-    registry.deployments(yprisma)
-    deployments = registry.deployments(yprisma)
-    yield project.YearnBoostedStaker.at(deployments.yearnBoostedStaker)
-    # start_time = Contract('0x5d17eA085F2FF5da3e6979D5d26F1dBaB664ccf8').startTime()
-    # start_time = 0
-    # staker = user.deploy(
-    #     project.YearnBoostedStaker, 
-    #     yprisma, 
-    #     4, # <-- Number of growth weeks
-    #     start_time,
-    #     gov,
-    # )
-    # yield staker
+    return staker
 
 @pytest.fixture(scope="session")
 def prisma_vault():
@@ -141,67 +167,81 @@ def prisma_vault():
 def gov_token(yprisma):
     yield yprisma
 
-@pytest.fixture(scope="session")
-def stable_token(yvmkusd):
-    yield yvmkusd
 
 @pytest.fixture(scope="session")
-def rewards(project, registry, user, yprisma, staker, gov_token, stable_token, gov):
-    deployments = registry.deployments(yprisma)
+def yvcrvusd():
+    yield Contract('0xBF319dDC2Edc1Eb6FDf9910E39b37Be221C8805F')
+
+@pytest.fixture(scope="session")
+def reward_token(yvmkusd, ycrv, token, yprisma, yvcrvusd):
+    if token == ycrv:
+        yield yvcrvusd
+    if token == yprisma:
+        yield yvmkusd
+
+@pytest.fixture(scope="session")
+def strategy():
+    return Contract('0xBdF157c3bad2164Ce6F9dc607fd115374010c5dC')
+
+@pytest.fixture(scope="session")
+def rewards(project, registry, user, token, staker, gov_token, gov, reward_token):
+    deployments = registry.deployments(token)
     yield project.SingleTokenRewardDistributor.at(deployments.rewardDistributor)
     # rewards_contract = user.deploy(
     #     project.SingleTokenRewardDistributor,
     #     staker,
-    #     stable_token,
+    #     reward_token,
     # )
     # yield rewards_contract
 
 @pytest.fixture(scope="session")
-def utils(project, registry, staker, yprisma, rewards, stable_token):
-    deployments = registry.deployments(yprisma)
-    yield project.YBSUtilities.at(deployments.utilities)
-    # utils = user.deploy(
-    #     project.YBSUtilities,
-    #     staker,
-    #     rewards,
-    # )
-    # yield utils
+def utils(project, registry, staker, token, rewards, user):
+    deployments = registry.deployments(token)
+    # yield project.YBSUtilities.at(deployments.utilities)
+    utils = user.deploy(
+        project.YBSUtilities,
+        deployments.yearnBoostedStaker,
+        deployments.rewardDistributor,
+    )
+    yield utils
 
 @pytest.fixture(scope="session")
-def fee_receiver(rewards, accounts, gov_token, stable_token):
+def fee_receiver(rewards, accounts, gov_token, reward_token):
     fee_receiver = YEARN_FEE_RECEIVER
     fr_account = accounts[fee_receiver]
     fr_account.balance += 20 ** 18
     gov_token.approve(rewards, 2**256-1, sender=fr_account)
-    stable_token.approve(rewards, 2**256-1, sender=fr_account)
+    reward_token.approve(rewards, 2**256-1, sender=fr_account)
     yield Contract(fee_receiver)
 
 @pytest.fixture(scope="session")
-def fee_receiver_acc(rewards, accounts, gov_token, stable_token):
+def fee_receiver_acc(rewards, accounts, gov_token, reward_token):
     fee_receiver = YEARN_FEE_RECEIVER
     fr_account = accounts[fee_receiver]
     fr_account.balance += 20 ** 18
     gov_token.approve(rewards, 2**256-1, sender=fr_account)
-    stable_token.approve(rewards, 2**256-1, sender=fr_account)
+    reward_token.approve(rewards, 2**256-1, sender=fr_account)
     yield fr_account
 
 @pytest.fixture(scope="function")
-def stake_and_deposit_rewards(yvmkusd_whale, user, accounts, staker, gov, user3, user2, yprisma, yvmkusd, rewards, fee_receiver, yprisma_whale):
-    fr_account = accounts[fee_receiver.address]
-    fr_account.balance += 20 ** 18
-    yprisma.approve(staker, 2**256-1, sender=user)
-    yprisma.approve(staker, 2**256-1, sender=user2)
-    yprisma.approve(staker, 2**256-1, sender=gov)
-    yprisma.approve(staker, 2**256-1, sender=user3)
-    yprisma.approve(rewards, 2**256-1, sender=fr_account)
-    yvmkusd.approve(rewards, 2**256-1, sender=fr_account)
+def stake_and_deposit_rewards(user, accounts, staker, gov, user3, user2, token, reward_token_whale, reward_token, rewards, token_whale):
+    
+    token.approve(staker, 2**256-1, sender=user)
+    token.approve(staker, 2**256-1, sender=user2)
+    token.approve(staker, 2**256-1, sender=gov)
+    token.approve(staker, 2**256-1, sender=user3)
+    token.approve(rewards, 2**256-1, sender=reward_token_whale)
+    reward_token.approve(rewards, 2**256-1, sender=reward_token_whale)
     # Enable stakes
     owner = accounts[staker.owner()]
     owner.balance += 10**18
     staker.setWeightedStaker(gov, True, sender=owner)
     rewards.configureRecipient(ZERO_ADDRESS, sender=user)
 
-    def stake_and_deposit_rewards(yprisma_whale=yprisma_whale, user=user, accounts=accounts, staker=staker, user2=user2, user3=user3, yprisma=yprisma, yvmkusd=yvmkusd, rewards=rewards, fee_receiver=fee_receiver):
+    def stake_and_deposit_rewards(
+            user=user, reward_token_whale=reward_token_whale,
+            staker=staker, user2=user2, user3=user3, rewards=rewards
+        ):
         # stake to staker
         amt = 100 * 10 ** 18
         staker.stake(amt, sender=user)
@@ -210,37 +250,38 @@ def stake_and_deposit_rewards(yvmkusd_whale, user, accounts, staker, gov, user3,
 
         # Deposit to rewards
         amt = 1_000 * 10 ** 18
-        rewards.depositReward(amt, sender=fr_account)
+        rewards.depositReward(amt, sender=reward_token_whale)
     
     yield stake_and_deposit_rewards
 
 @pytest.fixture(scope="function")
 def deposit_rewards(yvmkusd_whale, rewards, fee_receiver, accounts):
     fr_account = accounts[fee_receiver.address]
-    def deposit_rewards(rewards=rewards,yvmkusd_whale=yvmkusd_whale, fr_account=fr_account):
+    def deposit_rewards(rewards=rewards, fr_account=fr_account):
         amt = 1_000 * 10 ** 18
         rewards.depositReward(amt, sender=fr_account)
     yield deposit_rewards
 
 @pytest.fixture(scope="session")
 def registry(project, yprisma, user, gov, rando):
-    approved_deployers = [rando]
-    ybs_factory = user.deploy(
-        project.YBSFactory
-    )
-    reward_factory = user.deploy(
-        project.YBSRewardFactory
-    )
-    utils_factory = user.deploy(
-        project.YBSUtilsFactory
-    )
-    registry = user.deploy(
-        project.YBSRegistry, 
-        gov,
-        ybs_factory,
-        reward_factory,
-        utils_factory,
-        approved_deployers,    # approved deployers
-    )
-    yield registry
+    yield Contract('0x262be1d31d0754399d8d5dc63B99c22146E9f738')
+    # approved_deployers = [rando]
+    # ybs_factory = user.deploy(
+    #     project.YBSFactory
+    # )
+    # reward_factory = user.deploy(
+    #     project.YBSRewardFactory
+    # )
+    # utils_factory = user.deploy(
+    #     project.YBSUtilsFactory
+    # )
+    # registry = user.deploy(
+    #     project.YBSRegistry, 
+    #     gov,
+    #     ybs_factory,
+    #     reward_factory,
+    #     utils_factory,
+    #     approved_deployers,    # approved deployers
+    # )
+    # yield registry
     # yield Contract('0x262be1d31d0754399d8d5dc63B99c22146E9f738')

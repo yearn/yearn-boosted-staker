@@ -1,11 +1,13 @@
 from ape import chain, project, Contract
-
+from ape.utils import ZERO_ADDRESS
 
 WEEK = 60 * 60 * 24 * 7
 
-def test_utils(
-    user, staker, user2, user3, stable_token,rewards, utils, stake_and_deposit_rewards, deposit_rewards
+def test_utils_from_start(
+    user, staker, user2, user3, reward_token ,rewards, utils, stake_and_deposit_rewards, deposit_rewards
 ):
+    if staker.totalSupply() > 0:
+        return
     print(f'In week: {utils.getWeek()}')
     stake_token_price = 17 * 10 ** 16 # $0.17
     reward_token_price = 10 ** 18
@@ -103,3 +105,43 @@ def test_utils(
     assert utils.getUserProjectedApr(user, stake_token_price, reward_token_price) > 0
     print('global active apr', utils.getWeek(), global_active_apr/1e18)
     print('global projected apr', utils.getWeek(), global_projected_apr/1e18)
+
+    assert False
+
+def test_utils_from_start(
+    old_utils, accounts, user, staker, user2, user3, strategy, reward_token ,rewards, utils, stake_and_deposit_rewards, deposit_rewards
+):
+    if old_utils == ZERO_ADDRESS:
+        return
+    receiver = accounts['0x584BffC5F51CcAe39aD69F1c399743620e619C2B']
+    receiver.balance += 10**18
+    reward_token_underlying = Contract(reward_token.asset())
+    reward_token_underlying.approve(reward_token, 2 ** 256-1, sender=receiver)
+    reward_token.approve(rewards, 2 ** 256-1, sender=receiver)
+    reward_token.deposit(reward_token_underlying.balanceOf(receiver), receiver, sender=receiver)
+    bal = reward_token.balanceOf(receiver)
+    rewards.depositReward(bal, sender=receiver)
+    stake_token_price = 2965 * 10 ** 14
+    reward_token_price = 10 ** 18
+
+    apr_after_fee = utils.getUserProjectedAprWithFee( 
+        strategy, 
+        stake_token_price, 
+        reward_token_price,
+        False # Hide unboosted
+    )
+
+    example_user = '0x4c745138025Fe0D3b16cbe449e7cAC5e5BEA2E3C'
+    user_apr_with_hidden = utils.getUserProjectedAprWithFee( 
+        example_user, 
+        stake_token_price, 
+        reward_token_price,
+        True # Hide unboosted
+    )
+    user_apr = utils.getUserProjectedAprWithFee( 
+        example_user, 
+        stake_token_price, 
+        reward_token_price,
+        False # Hide unboosted
+    )
+    assert False

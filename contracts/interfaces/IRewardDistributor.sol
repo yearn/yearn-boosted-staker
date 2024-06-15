@@ -19,7 +19,7 @@ interface IRewardDistributor {
     // Functions
     function PRECISION() external view returns (uint256);
     function staker() external view returns (address);
-    function rewardToken() external view returns (address);
+    function rewardToken() external view returns (IERC20);
     function depositReward(uint _amount) external;
     function depositRewardFrom(address _target, uint _amount) external;
     function claim() external returns (uint amountClaimed);
